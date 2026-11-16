@@ -1,0 +1,10 @@
+{
+  "port": 8787,
+  "port_scan": 20,
+  "upstream": "https://opencode.ai/inference/go/v1",
+  "session_mode": "conversation",
+  "log_requests": true,
+  "log_usage": true,
+  "node_exe": "",
+  "log_file": "logs/proxy.log"
+}

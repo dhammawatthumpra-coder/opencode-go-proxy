@@ -1,0 +1,26 @@
+# Logs
+logs/
+*.log
+
+# Generated at first run by tray_app.py
+icon.png
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyc
+.venv/
+venv/
+env/
+
+# Editors / OS
+.vscode/
+.idea/
+Thumbs.db
+desktop.ini
+.DS_Store
+
+# Local overrides and backups
+config.local.json
+*.bak
+*.bak2*

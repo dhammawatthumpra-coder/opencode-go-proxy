@@ -1,0 +1,8 @@
+# Keep Windows batch files CRLF so cmd.exe behaves
+*.bat text eol=crlf
+
+# Normalise the rest
+*.py   text eol=lf
+*.mjs  text eol=lf
+*.json text eol=lf
+*.md   text eol=lf
