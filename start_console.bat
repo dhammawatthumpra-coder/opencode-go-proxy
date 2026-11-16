@@ -7,7 +7,7 @@ set PORT_SCAN=20
 set UPSTREAM=https://opencode.ai/inference/go/v1
 set SESSION_MODE=conversation
 set LOG=1
-set DUMP=1
 set USAGE=1
+REM set DUMP=1  (off by default: it writes the first 60 chars of your first user message to the log)
 node go-session-proxy.mjs
 pause

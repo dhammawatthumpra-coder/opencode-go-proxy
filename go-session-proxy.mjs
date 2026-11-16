@@ -17,6 +17,9 @@
 //   node go-session-proxy.mjs --check oc_sk_...
 //   sends one tiny request per API shape and prints the real error.
 //
+//   curl http://127.0.0.1:8787/__stats
+//   running totals across this run: requests, hit%, tokens and money saved.
+//
 // Env:
 //   PORT              preferred listen port   (default 8787, 0 = OS picks)
 //   PORT_SCAN         how many ports to try upward when PORT is busy (default 20,
@@ -25,7 +28,9 @@
 //   SESSION_MODE      conversation | fixed | passthrough   (default conversation)
 //                       conversation - derive a stable id from system + first messages
 //                                      so every turn of one chat reuses the same route
-//                                      and prompt cache
+//                                      and prompt cache. A second chat that reuses the
+//                                      same opener gets its own _rN id instead of
+//                                      sharing the first one's cache
 //                       fixed        - one id for every request
 //                       passthrough  - never touch a session header the client sends
 //   OPENCODE_SESSION  id used by fixed mode (default ses_proxy_local_0001)
@@ -35,6 +40,9 @@
 //   DUMP=1            with LOG, also print message count, system prompt length
 //                     and the first user message, so you can see what changed
 //                     between two requests that produced different session ids
+//   PRICE_CACHE=      per-1M prices used only by the savings display
+//   PRICE_MISS=         default 0.003 / 0.15 / 0.60, matching the README table
+//   PRICE_OUT=          set these when your model is priced differently
 //
 // In conversation mode the derived id wins even if the client sends its own,
 // because a client-generated id that changes per request is exactly what
@@ -53,6 +61,17 @@ const SESSION_MODE = process.env.SESSION_MODE ?? "conversation";
 const LOG = process.env.LOG === "1";
 const DUMP = process.env.DUMP === "1";
 const USAGE = process.env.USAGE === "1";
+
+// List prices per 1M tokens, used only by the savings display (README table).
+// Override with PRICE_* when the model is priced differently.
+const PRICE_CACHE = Number(process.env.PRICE_CACHE ?? 0.003);
+const PRICE_MISS = Number(process.env.PRICE_MISS ?? 0.15);
+const PRICE_OUT = Number(process.env.PRICE_OUT ?? 0.6);
+
+// Running totals, served on GET /__stats and in a summary line every 10 turns.
+const stats = { requests: 0, window: 0, sessions: new Set(), hit: 0, miss: 0, input: 0, output: 0 };
+
+const round6 = (n) => Number(n.toFixed(6));
 
 // Header names the Go gateway accepts as a session id.
 const SESSION_HEADERS = [
@@ -139,6 +158,32 @@ function analyzeConversation(body) {
   };
 }
 
+// A second chat that happens to share the first message (harnesses often open
+// with the same boilerplate reminder) would derive the same id and fight the
+// first chat over one cache entry. A conversation that was already several
+// messages in and suddenly presents a single message is a different chat, so
+// give it its own id. Staying at one message is left alone, because that is
+// also what a retry of the opening turn looks like and a retry should reuse
+// the cache. Sliding-window harnesses never drop to one message, so they are
+// unaffected.
+const affinity = new Map();
+
+function touchSession(base, msgs) {
+  if (!base) return null;
+  let e = affinity.get(base);
+  if (!e) {
+    e = { id: base, msgs: msgs ?? 0, rot: 0 };
+    affinity.set(base, e);
+  } else if (msgs === 1 && e.msgs > 1) {
+    e.rot += 1;
+    e.id = `${base}_r${e.rot}`;
+    e.msgs = msgs;
+  } else if (msgs != null) {
+    e.msgs = msgs;
+  }
+  return e.id;
+}
+
 // Pull the key out of whichever header the client used.
 function pickApiKey(headers) {
   const auth = headers["authorization"];
@@ -204,6 +249,8 @@ function usageMeter(session) {
       const output = found.completion_tokens ?? found.output_tokens;
       if (hit == null && input == null && output == null) return cb();
 
+      recordUsage(session, { hit, miss, input, output });
+
       const parts = [];
       if (hit != null) parts.push(`cache_read=${hit}`);
       if (miss != null) parts.push(`cache_miss=${miss}`);
@@ -214,6 +261,46 @@ function usageMeter(session) {
       cb();
     },
   });
+}
+
+// Tokens that came from cache were billed at the cheap rate instead of the
+// full input rate, so `hit` is exactly the number of tokens saved.
+function recordUsage(session, u) {
+  if (u.hit == null && u.input == null && u.output == null) return;
+  const input = u.input ?? (u.hit ?? 0) + (u.miss ?? 0);
+  const hit = u.hit ?? 0;
+  stats.hit += hit;
+  stats.miss += u.miss ?? Math.max(0, input - hit);
+  stats.input += input;
+  stats.output += u.output ?? 0;
+  if (session) stats.sessions.add(session);
+
+  stats.window += 1;
+  if (stats.window % 10 === 0) {
+    const v = statsView();
+    console.log(`  stats ${v.requests} req / ${v.sessions} ses: hit=${v.hit_pct}% saved=~$${v.est_saved_usd}`);
+  }
+}
+
+function statsView() {
+  // "Without cache" bills every input token at the miss rate; that difference
+  // is what this proxy is worth. Output is identical either way.
+  const actual = stats.hit * PRICE_CACHE + stats.miss * PRICE_MISS + stats.output * PRICE_OUT;
+  const baseline = stats.input * PRICE_MISS + stats.output * PRICE_OUT;
+  return {
+    requests: stats.requests,
+    sessions: stats.sessions.size,
+    input_tokens: stats.input,
+    cache_read_tokens: stats.hit,
+    cache_miss_tokens: stats.miss,
+    output_tokens: stats.output,
+    hit_pct: stats.input ? Math.round((stats.hit / stats.input) * 100) : 0,
+    tokens_saved: stats.hit,
+    est_cost_usd: round6(actual / 1e6),
+    est_cost_without_cache_usd: round6(baseline / 1e6),
+    est_saved_usd: round6((baseline - actual) / 1e6),
+    prices_per_1m: { cache_read: PRICE_CACHE, cache_miss: PRICE_MISS, output: PRICE_OUT },
+  };
 }
 
 const MAX_BODY = 64 * 1024 * 1024;
@@ -237,6 +324,13 @@ function readBody(req) {
 }
 
 const server = http.createServer(async (req, res) => {
+  // Local-only reporting endpoint; never forwarded upstream.
+  if (req.method === "GET" && String(req.url).replace(/\?.*$/, "").replace(/\/+$/, "") === "/__stats") {
+    res.writeHead(200, { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" });
+    res.end(JSON.stringify(statsView(), null, 2));
+    return;
+  }
+
   const path = toUpstreamPath(req.url);
   const url = UPSTREAM + path;
 
@@ -260,13 +354,15 @@ const server = http.createServer(async (req, res) => {
   }
 
   const conv = analyzeConversation(body);
+  const derived = conv.id ? touchSession(conv.id, conv.debug?.msgs) : null;
   const session =
     SESSION_MODE === "passthrough"
       ? null
       : SESSION_MODE === "fixed"
         ? SESSION
-        : (conv.id ?? (hasSession(headers) ? null : SESSION));
+        : (derived ?? (hasSession(headers) ? null : SESSION));
   if (session) headers["x-opencode-session"] = session;
+  stats.requests += 1;
 
   if (headers["user-agent"] == null) headers["user-agent"] = "go-session-proxy/1.0";
   shapeAuth(headers, path);

@@ -40,18 +40,18 @@ macOS/Linux just run the `.mjs` directly.
 Double-click `start_tray.bat`, or:
 
 ```powershell
-cd D:\tunnel\opencodeproxy
+cd path\to\opencode-go-proxy
 pythonw tray_app.py
 ```
 
 A green **GO** icon appears in the system tray:
 
-- `● Go proxy: RUNNING (tray) :8787` — status
-- `http://127.0.0.1:8787/v1` — the base URL to paste into your harness
-- **Live log…** — real-time log with session id + cache hit per request
+- `● Go proxy: RUNNING (tray) :8787` — status (non-clickable)
+- `http://127.0.0.1:8787/v1` — the base URL to paste into your harness (non-clickable)
 - **Copy base URL** — clipboard
-- **Proxy control** → run hidden / in a console window, Start / Stop, Restart
 - **Auto-start with Windows: ON/OFF**
+- **Proxy control** → **Live log...** (real-time log with session id + cache hit
+  per request), run hidden / in a console window, Start / Stop proxy, Restart proxy
 - **Open proxy folder** / **Quit**
 
 ### Plain Node (any OS)
@@ -111,10 +111,14 @@ Key setup in the OpenCode Console:
 | `log_requests` | sets `LOG=1` |
 | `log_usage` | sets `USAGE=1` |
 | `node_exe` | empty = auto-detect `node.exe` |
+| `log_file` | where the proxy writes its log (default `logs/proxy.log`, rotated at 5 MB) |
 
 When running the `.mjs` directly, the same options are environment variables:
 `PORT`, `PORT_SCAN`, `UPSTREAM`, `SESSION_MODE`, `OPENCODE_SESSION`, `LOG`,
-`USAGE`, `DUMP`.
+`USAGE`, `DUMP`, `PRICE_CACHE`, `PRICE_MISS`, `PRICE_OUT`.
+
+The tray app reads only the fields listed above; the `PRICE_*` overrides have no
+`config.json` equivalent yet and must be set in the environment.
 
 ### Port selection
 
@@ -139,9 +143,11 @@ RUNTIME_PORT=8788
 The tray app watches for `RUNTIME_PORT=` and shows the **real** URL in its menu,
 so **Copy base URL** always copies the port the proxy actually bound.
 
+### Session modes
+
 | Mode | Behaviour |
 |---|---|
-| `conversation` | id = hash of system + first user message. Stable across turns of one chat, different per chat. Overrides any client-sent id, because an id that changes per request is what kills cache affinity. |
+| `conversation` | id = hash of system + first user message. Stable across turns of one chat, different per chat. Overrides any client-sent id, because an id that changes per request is what kills cache affinity. Two chats that open with the same first message would collide, so if a conversation that was already several messages in suddenly presents a single message it gets a `_r1` id of its own. A single-message repeat is left alone, since that is a retry of the opening turn. |
 | `fixed` | one id for every request |
 | `passthrough` | never touch a session header the client sends |
 
@@ -175,6 +181,38 @@ then compare two turns of the same chat:
 
 Note that `out` is 200x the price of a cached read, so a turn where the agent
 "thinks a lot" costs more regardless of cache. That is expected.
+
+## Measured savings
+
+`GET http://127.0.0.1:8787/__stats` returns running totals for this run, and the
+proxy prints a summary line every 10 turns:
+
+```
+  stats 10 req / 2 ses: hit=90% saved=~$0.001323
+```
+
+```json
+{
+  "requests": 10,
+  "sessions": 2,
+  "input_tokens": 10000,
+  "cache_read_tokens": 9000,
+  "cache_miss_tokens": 1000,
+  "output_tokens": 500,
+  "hit_pct": 90,
+  "tokens_saved": 9000,
+  "est_cost_usd": 0.000477,
+  "est_cost_without_cache_usd": 0.0018,
+  "est_saved_usd": 0.001323,
+  "prices_per_1m": { "cache_read": 0.003, "cache_miss": 0.15, "output": 0.6 }
+}
+```
+
+`tokens_saved` is the cached-read count: every one of those tokens was billed at
+the cheap rate instead of the full input rate. The `est_*` costs are estimates
+from the price table above — override them with `PRICE_CACHE`, `PRICE_MISS`,
+`PRICE_OUT` (per 1M tokens) when your model is priced differently. Counters are
+in memory and reset when the proxy restarts.
 
 ## Troubleshooting
 
