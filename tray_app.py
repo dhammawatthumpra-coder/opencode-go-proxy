@@ -9,6 +9,7 @@ Runs the Node proxy as a child process and shows a system-tray icon managing:
      - Start / Stop / Restart
   2. Utility:
      - Copy harness base URL to clipboard
+     - Floating stats overlay (cache hit %, tokens and money saved)
      - Open proxy folder
      - Auto-start with Windows on/off
      - Quit
@@ -26,6 +27,7 @@ import subprocess
 import sys
 import threading
 import time
+import urllib.request
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 PROXY_JS = os.path.join(BASE_DIR, "go-session-proxy.mjs")
@@ -317,6 +319,143 @@ def open_log_window(ic=None, item=None):
     threading.Thread(target=_run, daemon=True).start()
 
 
+# ------------------------------------------------------------ stats overlay ---
+
+# A small floating card that only reads GET /__stats. Shown and hidden from the
+# tray menu; while hidden it keeps the window alive but withdrawn, so toggling
+# is instant and the Tk loop is only ever created once.
+_stats_win = {"want": False, "open": False}
+
+
+def stats_url():
+    return f"http://127.0.0.1:{RUNTIME['port'] or PORT}/__stats"
+
+
+def fetch_stats():
+    """Current /__stats payload, or None when the proxy is not answering."""
+    try:
+        with urllib.request.urlopen(stats_url(), timeout=0.5) as r:
+            return json.loads(r.read().decode("utf-8"))
+    except Exception:
+        return None
+
+
+def short_tokens(n):
+    n = int(n or 0)
+    if n >= 1_000_000:
+        return f"{n / 1_000_000:.1f}M"
+    if n >= 1_000:
+        return f"{n / 1_000:.0f}k"
+    return str(n)
+
+
+def open_stats_overlay(ic=None, item=None):
+    _stats_win["want"] = True
+    if _stats_win["open"]:
+        return
+    _stats_win["open"] = True
+
+    def _run():
+        import tkinter as tk
+
+        BG, DIM, FG, GOOD, BAD = "#0e1116", "#7d8695", "#e6edf3", "#22c55e", "#ef4444"
+
+        root = tk.Tk()
+        root.overrideredirect(True)
+        root.attributes("-topmost", True)
+        root.attributes("-alpha", 0.93)
+        root.configure(bg=BG)
+        # Not winfo_screenwidth()-272: on a 125% display Tk reports the full
+        # 1536 px while the drawable coordinate space is only ~1229, so a
+        # right-edge placement lands off screen. A fraction is always visible
+        # and the card can be dragged anywhere.
+        root.geometry(f"252x164+{int(root.winfo_screenwidth() * 0.62)}+48")
+
+        def drag_start(e):
+            root._drag = (e.x_root - root.winfo_x(), e.y_root - root.winfo_y())
+
+        def drag_move(e):
+            dx, dy = getattr(root, "_drag", (0, 0))
+            root.geometry(f"+{e.x_root - dx}+{e.y_root - dy}")
+
+        def hide(_e=None):
+            _stats_win["want"] = False
+            root.withdraw()
+
+        head = tk.Frame(root, bg=BG)
+        head.pack(fill="x", padx=14, pady=(10, 0))
+        dot = tk.Label(head, text="\u25cf", bg=BG, fg=BAD, font=("Segoe UI", 9))
+        dot.pack(side="left")
+        tk.Label(head, text=" GO PROXY", bg=BG, fg=DIM,
+                 font=("Segoe UI", 8, "bold")).pack(side="left")
+        close = tk.Label(head, text="\u2715", bg=BG, fg=DIM, font=("Segoe UI", 9), cursor="hand2")
+        close.pack(side="right")
+        close.bind("<Button-1>", hide)
+
+        big = tk.Label(root, text="\u2014", bg=BG, fg=FG, font=("Segoe UI", 26, "bold"))
+        big.pack(pady=(2, 0))
+        tk.Label(root, text="cache hit", bg=BG, fg=DIM, font=("Segoe UI", 8)).pack()
+
+        body = tk.Label(root, text="waiting...", bg=BG, fg=DIM,
+                        font=("Consolas", 9), justify="left")
+        body.pack(pady=(6, 0))
+
+        for w in (root, head, dot, big, body):
+            w.bind("<Button-1>", drag_start)
+            w.bind("<B1-Motion>", drag_move)
+            w.bind("<Double-Button-1>", hide)
+        root.bind("<Escape>", hide)
+
+        def tick():
+            if not _stats_win["open"]:
+                return
+            if _stats_win["want"]:
+                if not root.winfo_viewable():
+                    root.deiconify()
+            elif root.winfo_viewable():
+                root.withdraw()
+
+            s = fetch_stats()
+            if s is None:
+                dot.config(fg=BAD)
+                big.config(text="\u2014", fg=DIM)
+                body.config(text=f"proxy not answering\n127.0.0.1:{RUNTIME['port'] or PORT}", fg=DIM)
+            else:
+                dot.config(fg=GOOD)
+                big.config(text=f"{s.get('hit_pct', 0)}%", fg=FG)
+                body.config(
+                    text=(
+                        f"saved    ${s.get('est_saved_usd', 0):.4f}\n"
+                        f"cached   {short_tokens(s.get('tokens_saved', 0))} tok\n"
+                        f"traffic  {s.get('requests', 0)} req / {s.get('sessions', 0)} ses"
+                    ),
+                    fg=DIM,
+                )
+            root.after(800, tick)
+
+        def on_destroy():
+            _stats_win["open"] = False
+            _stats_win["want"] = False
+
+        root.protocol("WM_DELETE_WINDOW", on_destroy)
+        root.after(200, tick)
+        root.mainloop()
+
+    threading.Thread(target=_run, daemon=True).start()
+
+
+def overlay_label(item=None):
+    return "Hide stats overlay" if _stats_win["want"] else "Show stats overlay"
+
+
+def on_toggle_overlay(ic, item):
+    if _stats_win["want"]:
+        _stats_win["want"] = False
+    else:
+        open_stats_overlay()
+    ic.update_menu()
+
+
 def copy_base_url(ic=None, item=None):
     """Copy the harness base URL to the clipboard."""
     try:
@@ -480,6 +619,7 @@ def main():
         pystray.MenuItem(url_line, lambda i, it: None, enabled=False),
         pystray.Menu.SEPARATOR,
         pystray.MenuItem("Copy base URL", copy_base_url),
+        pystray.MenuItem(overlay_label, on_toggle_overlay),
         pystray.MenuItem(autostart_label, on_toggle_autostart),
         pystray.Menu.SEPARATOR,
         pystray.MenuItem("Proxy control", proxy_menu),

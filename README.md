@@ -49,6 +49,8 @@ A green **GO** icon appears in the system tray:
 - `● Go proxy: RUNNING (tray) :8787` — status (non-clickable)
 - `http://127.0.0.1:8787/v1` — the base URL to paste into your harness (non-clickable)
 - **Copy base URL** — clipboard
+- **Show stats overlay** / **Hide stats overlay** — the floating card described
+  under [Measured savings](#measured-savings)
 - **Auto-start with Windows: ON/OFF**
 - **Proxy control** → **Live log...** (real-time log with session id + cache hit
   per request), run hidden / in a console window, Start / Stop proxy, Restart proxy
@@ -185,7 +187,12 @@ Note that `out` is 200x the price of a cached read, so a turn where the agent
 ## Measured savings
 
 `GET http://127.0.0.1:8787/__stats` returns running totals for this run, and the
-proxy prints a summary line every 10 turns:
+proxy prints a summary line every 10 turns.
+
+The tray app can put the same numbers on a small floating card
+(**Show stats overlay**): always on top, drag it anywhere, double-click or hit
+the ✕ to hide it. It only reads `/__stats`, so it never touches the API key or
+the upstream. Numbers are per proxy run and start from zero after a restart.
 
 ```
   stats 10 req / 2 ses: hit=90% saved=~$0.001323
