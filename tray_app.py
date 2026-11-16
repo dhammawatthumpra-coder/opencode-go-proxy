@@ -363,8 +363,12 @@ def open_stats_overlay(ic=None, item=None):
         root = tk.Tk()
         root.overrideredirect(True)
         root.attributes("-topmost", True)
-        root.attributes("-alpha", 0.93)
-        root.configure(bg=BG)
+        # Opaque on purpose: 0.93, 0.97 and even 0.99 all let bright text from
+        # the window behind show through the card, which made the numbers hard
+        # to read. The hairline border is what keeps it looking like a floating
+        # card rather than a hole in the screen.
+        root.attributes("-alpha", 1.0)
+        root.configure(bg=BG, highlightthickness=1, highlightbackground="#2a313c")
         # Not winfo_screenwidth()-272: on a 125% display Tk reports the full
         # 1536 px while the drawable coordinate space is only ~1229, so a
         # right-edge placement lands off screen. A fraction is always visible
