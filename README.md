@@ -206,6 +206,8 @@ The tray app can put the same numbers on a small floating card
 the ✕ to hide it. It only reads `/__stats`, so it never touches the API key or
 the upstream. Numbers are per proxy run and start from zero after a restart.
 
+![Stats overlay showing 96% cache hit, $0.5681 saved over 25 requests](docs/stats-overlay.png)
+
 ```
   stats 10 req / 2 ses: hit=90% saved=~$0.001323
 ```
