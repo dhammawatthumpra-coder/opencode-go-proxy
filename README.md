@@ -84,6 +84,12 @@ OK   Anthropic /messages      + x-api-key -> 200
   A key set to `Read` returns `403 This API key can't call models` even though
   it can list models.
 
+> **The URL has to match the port the proxy actually bound.** If the preferred
+> port was taken, the proxy walks up (see [Port selection](#port-selection)) and
+> a harness still pointed at the old port talks to whatever else owns it: the
+> proxy sees no traffic, the harness answers normally, and the cache never
+> warms. Take the URL from the tray menu (**Copy base URL**) instead of typing it.
+
 Key setup in the OpenCode Console:
 `Account → Personal API keys → key → Edit… → Permissions → Restricted → Models: Request`
 
@@ -107,7 +113,7 @@ Key setup in the OpenCode Console:
 | Field | Meaning |
 |---|---|
 | `port` | preferred port — bound to `127.0.0.1` only. `0` lets the OS pick a free one |
-| `port_scan` | how many ports to try upward when `port` is busy (`0` = fail instead) |
+| `port_scan` | how many ports to try upward when `port` is busy (`0` = fail instead — see [the trade-off](#port-selection)) |
 | `upstream` | Go base URL |
 | `session_mode` | `conversation` (recommended) / `fixed` / `passthrough` |
 | `log_requests` | sets `LOG=1` |
@@ -144,6 +150,12 @@ RUNTIME_PORT=17388
 
 The tray app watches for `RUNTIME_PORT=` and shows the **real** URL in its menu,
 so **Copy base URL** always copies the port the proxy actually bound.
+
+**The trade-off.** Walking up is convenient, and silent. A harness still pointed
+at the preferred port sends its requests to whatever else took that port: the
+proxy log stays empty, the harness answers normally, and the prompt cache never
+warms. When that is worse than a hard failure, set `port_scan` to `0` — the proxy
+then exits with `EADDRINUSE` and the tray watchdog backs off instead of looping.
 
 ### Session modes
 
@@ -230,6 +242,7 @@ in memory and reset when the proxy restarts.
 | `401 Invalid credential` | key rejected | typo, revoked, expired, or wrong workspace |
 | `403 This API key can't call models` | key is scoped to `Models: Read` | set `Models: Request` |
 | `EADDRINUSE` | another copy is already running, and `port_scan` is 0 | quit one, or raise `port_scan` |
+| harness replies normally but `logs/proxy.log` stays empty | the harness points at a port the proxy is not on — the proxy moved, or something else owns that port | use **Copy base URL** from the tray, or set `port_scan` to `0` |
 
 **Don't run two copies.** If the tray app is running, don't also start
 `node go-session-proxy.mjs` in a terminal. With `port_scan` enabled the second
