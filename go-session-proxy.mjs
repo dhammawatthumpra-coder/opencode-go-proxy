@@ -12,16 +12,16 @@
 //
 // Usage:
 //   node go-session-proxy.mjs
-//   point the harness base URL at: http://127.0.0.1:8787/v1
+//   point the harness base URL at: http://127.0.0.1:17387/v1
 //
 //   node go-session-proxy.mjs --check oc_sk_...
 //   sends one tiny request per API shape and prints the real error.
 //
-//   curl http://127.0.0.1:8787/__stats
+//   curl http://127.0.0.1:17387/__stats
 //   running totals across this run: requests, hit%, tokens and money saved.
 //
 // Env:
-//   PORT              preferred listen port   (default 8787, 0 = OS picks)
+//   PORT              preferred listen port   (default 17387, 0 = OS picks)
 //   PORT_SCAN         how many ports to try upward when PORT is busy (default 20,
 //                     0 = fail instead of scanning)
 //   UPSTREAM          Go base URL            (default https://opencode.ai/inference/go/v1)
@@ -53,7 +53,7 @@ import crypto from "node:crypto";
 import { Readable, Transform } from "node:stream";
 import { StringDecoder } from "node:string_decoder";
 
-const PREFERRED_PORT = Number(process.env.PORT ?? 8787);
+const PREFERRED_PORT = Number(process.env.PORT ?? 17387);
 const PORT_SCAN = Number(process.env.PORT_SCAN ?? 20);
 const UPSTREAM = (process.env.UPSTREAM ?? "https://opencode.ai/inference/go/v1").replace(/\/+$/, "");
 const SESSION = process.env.OPENCODE_SESSION ?? "ses_proxy_local_0001";

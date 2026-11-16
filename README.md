@@ -46,8 +46,8 @@ pythonw tray_app.py
 
 A green **GO** icon appears in the system tray:
 
-- `● Go proxy: RUNNING (tray) :8787` — status (non-clickable)
-- `http://127.0.0.1:8787/v1` — the base URL to paste into your harness (non-clickable)
+- `● Go proxy: RUNNING (tray) :17387` — status (non-clickable)
+- `http://127.0.0.1:17387/v1` — the base URL to paste into your harness (non-clickable)
 - **Copy base URL** — clipboard
 - **Show stats overlay** / **Hide stats overlay** — the floating card described
   under [Measured savings](#measured-savings)
@@ -78,8 +78,8 @@ OK   Anthropic /messages      + x-api-key -> 200
 
 ## Point your harness at it
 
-- **Base URL**: `http://127.0.0.1:8787/v1`
-  (or `http://127.0.0.1:8787` if the harness appends `/v1/...` itself — both work)
+- **Base URL**: `http://127.0.0.1:17387/v1`
+  (or `http://127.0.0.1:17387` if the harness appends `/v1/...` itself — both work)
 - **API key**: a Console key whose permission is **`Models: Request`**.
   A key set to `Read` returns `403 This API key can't call models` even though
   it can list models.
@@ -93,7 +93,7 @@ Key setup in the OpenCode Console:
 
 ```json
 {
-  "port": 8787,
+  "port": 17387,
   "port_scan": 20,
   "upstream": "https://opencode.ai/inference/go/v1",
   "session_mode": "conversation",
@@ -128,7 +128,7 @@ The proxy never fails just because the default port is taken:
 
 | `port` | Behaviour |
 |---|---|
-| `8787` (default) | binds 8787; if busy, walks up to 8788, 8789, … up to `port_scan` tries |
+| `17387` (default) | binds 17387; if busy, walks up to 17388, 17389, … up to `port_scan` tries |
 | `0` | the OS assigns a free port at random |
 | any number | same fallback behaviour, starting from that number |
 
@@ -136,10 +136,10 @@ When the port differs from the preferred one, the proxy prints a
 machine-readable line and a warning:
 
 ```
-Port 8787 is busy, trying 8788...
-Go proxy listening on http://127.0.0.1:8788/v1
-RUNTIME_PORT=8788
-  note: preferred port 8787 was busy; update your harness to the URL above
+Port 17387 is busy, trying 17388...
+Go proxy listening on http://127.0.0.1:17388/v1
+RUNTIME_PORT=17388
+  note: preferred port 17387 was busy; update your harness to the URL above
 ```
 
 The tray app watches for `RUNTIME_PORT=` and shows the **real** URL in its menu,
@@ -156,7 +156,7 @@ so **Copy base URL** always copies the port the proxy actually bound.
 ## Reading the log
 
 ```
-Go proxy listening on http://127.0.0.1:8787/v1
+Go proxy listening on http://127.0.0.1:17387/v1
 200 POST /chat/completions ses_44fb6d00b583751dddad82ef4c20c6c5 | msgs=39 sysLen=0 first="<system-reminder>..."
     usage ses_44fb6d00...: cache_read=38400 in=38859 out=76 hit=99%
 ```
@@ -186,7 +186,7 @@ Note that `out` is 200x the price of a cached read, so a turn where the agent
 
 ## Measured savings
 
-`GET http://127.0.0.1:8787/__stats` returns running totals for this run, and the
+`GET http://127.0.0.1:17387/__stats` returns running totals for this run, and the
 proxy prints a summary line every 10 turns.
 
 The tray app can put the same numbers on a small floating card

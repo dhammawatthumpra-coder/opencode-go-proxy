@@ -1,5 +1,5 @@
 {
-  "port": 8787,
+  "port": 17387,
   "port_scan": 20,
   "upstream": "https://opencode.ai/inference/go/v1",
   "session_mode": "conversation",

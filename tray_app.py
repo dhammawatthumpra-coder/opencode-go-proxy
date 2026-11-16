@@ -62,7 +62,7 @@ def load_config():
 
 
 CFG = load_config()
-PORT = int(CFG.get("port", 8787))
+PORT = int(CFG.get("port", 17387))
 PORT_SCAN = int(CFG.get("port_scan", 20))
 UPSTREAM = CFG.get("upstream", "https://opencode.ai/inference/go/v1")
 LOG_PATH = os.path.join(BASE_DIR, CFG.get("log_file", "logs/proxy.log"))
