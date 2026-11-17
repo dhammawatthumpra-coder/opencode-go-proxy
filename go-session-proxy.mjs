@@ -280,6 +280,9 @@ function shapeAuth(headers, path) {
   if (isAnthropicPath(path)) {
     headers["x-api-key"] = key;
     delete headers["api-key"];
+    // The key now travels in x-api-key; leaving the client's Bearer header
+    // would send the same credential twice, in a shape this path does not take.
+    delete headers["authorization"];
     headers["anthropic-version"] ??= "2023-06-01";
   } else if (isOpenAIPath(path)) {
     headers["authorization"] = `Bearer ${key}`;

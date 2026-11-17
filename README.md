@@ -94,6 +94,12 @@ OK   Anthropic /messages      + x-api-key -> 200
   A key set to `Read` returns `403 This API key can't call models` even though
   it can list models.
 
+**API shapes it takes:** `POST /chat/completions` and `/responses` (OpenAI
+style, key goes in `Authorization: Bearer`) and `/messages` (Anthropic style,
+key goes in `x-api-key`). Any `/v1`, `/openai/v1` or `/anthropic/v1` prefix is
+folded away, so Codex, Claude Code and the plain OpenAI SDKs can all use the
+same base URL.
+
 > **The URL has to match the port the proxy actually bound.** If the preferred
 > port was taken, the proxy walks up (see [Port selection](#port-selection)) and
 > a harness still pointed at the old port talks to whatever else owns it: the
@@ -357,11 +363,21 @@ stale. The key is never logged. No key → the rows show `—`; a 401 or a timeo
 
 ## Tests
 
-Neither suite touches the network, starts the proxy, or needs a display.
+The unit suites touch no network and need no display.
 
 ```bash
-node --test test/proxy.test.mjs        # path folding, session ids, compaction, cost maths
-python -m unittest discover -s test    # tray helpers; skipped if pystray is missing
+node --test test/proxy.test.mjs          # path folding, session ids, compaction, cost maths
+python -m unittest discover -s test      # tray helpers; skipped if pystray is missing
+```
+
+`test/integration.test.mjs` runs the real proxy against a mock upstream on
+localhost and checks what the unit tests cannot see: which auth header each
+path gets, that the path reaching the gateway is folded, that the session
+header is injected, that a streamed turn passes through byte for byte and is
+still metered, and that `/__stats`, `/__stats/history` and the reset behave.
+
+```bash
+node --test test/integration.test.mjs
 ```
 
 ## Flow
