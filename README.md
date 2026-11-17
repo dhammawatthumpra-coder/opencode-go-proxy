@@ -52,10 +52,11 @@ it (set `overlay_show_on_start` to `false` if you would rather open it yourself)
 - **Copy base URL** — clipboard
 - **Show stats overlay** / **Hide stats overlay** — the floating card described
   under [Measured savings](#measured-savings)
+- **Usage history...** — today / 7 / 30 days from the per-day ledger
 - **Settings...** — the same window as the ⚙ on the card: usage key, card
-  opacity, and the proxy actions (copy URL, live log, restart, start/stop,
-  auto-start). Everything here also exists in this menu, for when the card is
-  hidden. The window remembers its own position too.
+  opacity, and the proxy actions (copy URL, live log, history, restart,
+  start/stop, auto-start). Everything here also exists in this menu, for when
+  the card is hidden. The window remembers its own position too.
 - **Auto-start with Windows: ON/OFF**
 - **Proxy control** → **Live log...** (real-time log with session id + cache hit
   per request), run hidden / in a console window, Start / Stop proxy, Restart proxy
@@ -267,6 +268,27 @@ from the price table above — override them with `PRICE_CACHE`, `PRICE_MISS`,
 Counters survive a restart: they are written to `logs/stats.json` and read back
 on start (`STATS_FILE=` keeps them in memory only). `POST /__stats/reset` zeroes
 them — the Settings window has a **Reset stats** button for that.
+
+### History
+
+`GET http://127.0.0.1:17387/__stats/history` returns a per-day ledger plus the
+**today / 7-day / 30-day** totals built from it. Reset does not touch it: reset
+zeroes the card so one task can be measured from zero, while the ledger keeps
+what actually happened.
+
+**Usage history** (the tray menu, or **History** in Settings) shows those three
+totals and the last 14 days as bars:
+
+```
+                    today     7 days    30 days
+  requests             42        318      1,204
+  tokens saved        1.5M      11.2M     48.6M
+  hit rate            96%        95%       93%
+  saved              $0.22      $1.64     $7.11
+```
+
+Days are local-time and kept for 400 days. The ledger starts on the day this
+version first runs — usage from before it was installed was never recorded.
 
 `responses_without_usage` counts replies that carried no usage block at all.
 Those are not errors, but they leave the totals low; the proxy warns once in the

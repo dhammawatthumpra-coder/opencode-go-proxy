@@ -79,7 +79,11 @@ const stats = {
   requests: 0, window: 0, sessions: new Set(),
   hit: 0, miss: 0, input: 0, output: 0,
   noUsage: 0, since: Date.now(),
+  // Per-day ledger, kept across resets: reset is "start counting this task
+  // again", not "forget what happened". Keyed YYYY-MM-DD, local time.
+  daily: {},
 };
+const DAILY_MAX_DAYS = 400;
 
 const round6 = (n) => Number(n.toFixed(6));
 
@@ -347,15 +351,32 @@ function usageMeter(session) {
 
 // Tokens that came from cache were billed at the cheap rate instead of the
 // full input rate, so `hit` is exactly the number of tokens saved.
-function recordUsage(session, u) {
+function dayKey(now = Date.now()) {
+  const d = new Date(now);
+  const p = (n) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+}
+
+const EMPTY_BUCKET = () => ({ requests: 0, hit: 0, miss: 0, input: 0, output: 0 });
+
+function recordUsage(session, u, now = Date.now()) {
   if (u.hit == null && u.input == null && u.output == null) return;
   const input = u.input ?? (u.hit ?? 0) + (u.miss ?? 0);
   const hit = u.hit ?? 0;
+  const miss = u.miss ?? Math.max(0, input - hit);
   stats.hit += hit;
-  stats.miss += u.miss ?? Math.max(0, input - hit);
+  stats.miss += miss;
   stats.input += input;
   stats.output += u.output ?? 0;
   if (session) stats.sessions.add(session);
+
+  const key = dayKey(now);
+  const day = (stats.daily[key] ??= EMPTY_BUCKET());
+  day.requests += 1;
+  day.hit += hit;
+  day.miss += miss;
+  day.input += input;
+  day.output += u.output ?? 0;
 
   stats.window += 1;
   if (stats.window % 10 === 0) {
@@ -388,8 +409,65 @@ function statsView() {
   };
 }
 
+// Same price maths as statsView, applied to a bucket of tokens.
+function bucketView(d) {
+  const hit = d?.hit ?? 0;
+  const miss = d?.miss ?? 0;
+  const input = d?.input ?? 0;
+  const output = d?.output ?? 0;
+  const actual = hit * PRICE_CACHE + miss * PRICE_MISS + output * PRICE_OUT;
+  const baseline = input * PRICE_MISS + output * PRICE_OUT;
+  return {
+    requests: d?.requests ?? 0,
+    input_tokens: input,
+    cache_read_tokens: hit,
+    output_tokens: output,
+    hit_pct: input ? Math.round((hit / input) * 100) : 0,
+    tokens_saved: hit,
+    est_cost_usd: round6(actual / 1e6),
+    est_saved_usd: round6((baseline - actual) / 1e6),
+  };
+}
+
+// Today / last 7 / last 30 days plus the per-day rows, all from the ledger.
+function historyView(now = Date.now()) {
+  const days = Object.entries(stats.daily)
+    .sort(([a], [b]) => (a < b ? -1 : 1))
+    .map(([date, d]) => ({ date, ...bucketView(d) }));
+
+  const since = (n) => {
+    const from = dayKey(now - (n - 1) * 86_400_000);
+    const acc = EMPTY_BUCKET();
+    for (const [k, d] of Object.entries(stats.daily)) {
+      if (k < from) continue;
+      acc.requests += d.requests;
+      acc.hit += d.hit;
+      acc.miss += d.miss;
+      acc.input += d.input;
+      acc.output += d.output;
+    }
+    return bucketView(acc);
+  };
+
+  return {
+    windows: {
+      today: bucketView(stats.daily[dayKey(now)]),
+      week: since(7),
+      month: since(30),
+    },
+    days,
+    prices_per_1m: { cache_read: PRICE_CACHE, cache_miss: PRICE_MISS, output: PRICE_OUT },
+  };
+}
+
+function pruneDaily() {
+  const keys = Object.keys(stats.daily).sort();
+  while (keys.length > DAILY_MAX_DAYS) delete stats.daily[keys.shift()];
+}
+
 function saveStats() {
   if (!STATS_FILE) return;
+  pruneDaily();
   try {
     fs.mkdirSync(path.dirname(STATS_FILE), { recursive: true });
     fs.writeFileSync(
@@ -410,11 +488,14 @@ function loadStats() {
     }
     if (Array.isArray(j.sessions)) stats.sessions = new Set(j.sessions);
     if (Number.isFinite(j.since)) stats.since = j.since;
+    if (j.daily && typeof j.daily === "object" && !Array.isArray(j.daily)) stats.daily = j.daily;
   } catch {
     // No file yet, or a corrupt one: starting from zero is the safe answer.
   }
 }
 
+// Clears the counters on the card so a task can be measured from zero. The
+// per-day ledger is deliberately left alone - that is the history.
 function resetStats() {
   stats.requests = 0;
   stats.window = 0;
@@ -502,6 +583,11 @@ const server = http.createServer(async (req, res) => {
     view.account = accountView();
     res.writeHead(200, { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" });
     res.end(JSON.stringify(view, null, 2));
+    return;
+  }
+  if (req.method === "GET" && String(req.url).replace(/\?.*$/, "").replace(/\/+$/, "") === "/__stats/history") {
+    res.writeHead(200, { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" });
+    res.end(JSON.stringify(historyView(), null, 2));
     return;
   }
   if (req.method === "POST" && String(req.url).replace(/\?.*$/, "").replace(/\/+$/, "") === "/__stats/reset") {
@@ -714,6 +800,9 @@ export {
   affinity,
   stats,
   statsView,
+  historyView,
+  bucketView,
+  dayKey,
   recordUsage,
   resetStats,
   saveStats,

@@ -16,6 +16,7 @@ const {
   affinity,
   stats,
   statsView,
+  historyView,
   recordUsage,
   resetStats,
   usageMeter,
@@ -129,6 +130,41 @@ test("totals and the cost maths", () => {
   assert.equal(v.est_saved_usd, 0.000132);
   assert.match(v.since, /^\d{4}-\d{2}-\d{2}T/);
   assert.equal(v.responses_without_usage, 0);
+});
+
+test("the daily ledger survives a reset", () => {
+  resetStats();
+  stats.daily = {}; // isolate from the other tests' days
+  const noon = Date.UTC(2026, 10, 17, 12, 0, 0);
+
+  recordUsage("s1", { hit: 900, miss: 100, input: 1000, output: 50 }, noon);
+  recordUsage("s1", { hit: 0, miss: 1000, input: 1000, output: 0 }, noon);
+  resetStats(); // counters to zero, history untouched
+  recordUsage("s1", { hit: 500, miss: 500, input: 1000, output: 10 }, noon);
+
+  assert.equal(stats.requests, 0, "the counters were reset");
+  const h = historyView(noon);
+  assert.equal(h.days.length, 1);
+  assert.equal(h.days[0].requests, 3, "all three turns are in the ledger");
+  assert.equal(h.days[0].cache_read_tokens, 1400);
+  assert.equal(h.windows.today.requests, 3);
+});
+
+test("week and month windows cover their own days only", () => {
+  resetStats();
+  stats.daily = {};
+  const DAY = 86_400_000;
+  const noon = Date.UTC(2026, 10, 17, 12, 0, 0);
+
+  recordUsage("s", { hit: 100, miss: 0, input: 100, output: 0 }, noon);
+  recordUsage("s", { hit: 200, miss: 0, input: 200, output: 0 }, noon - 3 * DAY);
+  recordUsage("s", { hit: 400, miss: 0, input: 400, output: 0 }, noon - 20 * DAY);
+
+  const h = historyView(noon);
+  assert.equal(h.windows.today.requests, 1);
+  assert.equal(h.windows.week.requests, 2);
+  assert.equal(h.windows.month.requests, 3);
+  assert.equal(h.days.length, 3);
 });
 
 test("a response without usage is counted, not silently ignored", async () => {

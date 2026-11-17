@@ -849,7 +849,7 @@ def open_settings_dialog(ic=None, item=None):
         row1.pack(fill="x", padx=18, pady=(6, 0))
         button(row1, "Copy base URL", copy_base_url).pack(side="left", padx=(0, 8))
         button(row1, "Live log", open_log_window).pack(side="left", padx=(0, 8))
-        button(row1, "Open folder", on_open_folder).pack(side="left")
+        button(row1, "History", open_history_window).pack(side="left")
 
         row2 = tk.Frame(root, bg=BG)
         row2.pack(fill="x", padx=18, pady=(6, 0))
@@ -874,6 +874,7 @@ def open_settings_dialog(ic=None, item=None):
             ctl.set_enabled(not ctl.enabled)
             refresh()
 
+        button(row2, "Open folder", on_open_folder).pack(side="left", padx=(0, 8))
         button(row2, "Restart proxy", restart).pack(side="left", padx=(0, 8))
         toggle_btn = button(row2, "Stop proxy" if ctl.enabled else "Start proxy", toggle)
         toggle_btn.pack(side="left")
@@ -940,6 +941,144 @@ def open_settings_dialog(ic=None, item=None):
         entry.focus_set()
         entry.select_range(0, "end")
         root.bind("<Escape>", lambda e: root.destroy())
+        root.mainloop()
+
+    threading.Thread(target=_run, daemon=True).start()
+
+
+# ------------------------------------------------------------ history card ---
+
+_history_win = {"open": False}
+
+
+def fetch_history():
+    url = f"http://127.0.0.1:{RUNTIME['port'] or PORT}/__stats/history"
+    try:
+        with urllib.request.urlopen(url, timeout=2) as r:
+            return json.loads(r.read().decode("utf-8"))
+    except Exception:
+        return None
+
+
+def money(v):
+    v = float(v or 0)
+    return f"${v:.2f}" if v >= 0.1 else f"${v:.4f}"
+
+
+def open_history_window(ic=None, item=None):
+    """Today / 7 / 30 days from the proxy's per-day ledger, plus the last 14
+    days as bars.
+
+    Reset stats only zeroes the card's counters; this ledger keeps recording,
+    so the history is the view to trust for "how much did I use this week"."""
+    if _history_win["open"]:
+        return
+    _history_win["open"] = True
+
+    def _run():
+        import tkinter as tk
+
+        BG, DIM, FG, GOOD, BAD = "#0e1116", "#7d8695", "#e6edf3", "#22c55e", "#ef4444"
+        TRACK, FIELD = "#2a313c", "#161b22"
+        W = 560
+
+        root = tk.Tk()
+        root.title("Usage history")
+        root.configure(bg=BG)
+        root.attributes("-topmost", True)
+        root.geometry(
+            f"{W}x336"
+            + (saved_pos("history_pos") or f"+{int(root.winfo_screenwidth() * 0.40)}+150")
+        )
+        root.resizable(False, False)
+
+        pending = {"id": None}
+
+        def remember(_e=None):
+            if pending["id"]:
+                root.after_cancel(pending["id"])
+            pending["id"] = root.after(
+                500, lambda: save_pos("history_pos", root.winfo_x(), root.winfo_y())
+            )
+
+        root.bind("<Configure>", remember)
+
+        body = tk.Frame(root, bg=BG)
+        body.pack(fill="x", padx=20, pady=(16, 0))
+
+        for c, head in enumerate(("", "today", "7 days", "30 days")):
+            tk.Label(body, text=head, bg=BG, fg=DIM, font=("Segoe UI", 8, "bold"),
+                     anchor="e" if c else "w"
+                     ).grid(row=0, column=c, sticky="ew", padx=(0, 14), pady=(0, 6))
+        for c in range(1, 4):
+            body.grid_columnconfigure(c, weight=1)
+
+        cells = {}
+        for r, name in enumerate(("requests", "tokens saved", "hit rate", "saved"), start=1):
+            tk.Label(body, text=name, bg=BG, fg=DIM, font=("Segoe UI", 9), anchor="w"
+                     ).grid(row=r, column=0, sticky="w", padx=(0, 18), pady=2)
+            for c in range(1, 4):
+                cell = tk.Label(body, text="\u2014", bg=BG, fg=FG, width=9,
+                                anchor="e", font=("Consolas", 10))
+                cell.grid(row=r, column=c, sticky="e", padx=(0, 14), pady=2)
+                cells[(r, c)] = cell
+
+        tk.Frame(root, bg=TRACK, height=1).pack(fill="x", padx=20, pady=(14, 8))
+        tk.Label(root, text="last 14 days - money saved per day", bg=BG, fg=DIM,
+                 anchor="w", font=("Segoe UI", 8)).pack(fill="x", padx=20)
+
+        canvas = tk.Canvas(root, width=W - 40, height=86, bg=BG, bd=0, highlightthickness=0)
+        canvas.pack(padx=20, pady=(6, 0))
+
+        def draw_bars(days):
+            canvas.delete("all")
+            last = days[-14:]
+            slot = (W - 40) / 14
+            vals = [float(d.get("est_saved_usd", 0)) for d in last]
+            top = max(vals) if vals and max(vals) > 0 else 1
+            base = 74
+            for i, v in enumerate(vals):
+                x = i * slot + 3
+                h = 3 + (v / top) * 58
+                canvas.create_rectangle(x, base - h, x + slot - 6, base,
+                                        fill=GOOD if v else FIELD, outline="")
+            canvas.create_line(0, base + 1, W - 40, base + 1, fill=TRACK)
+
+        bar = tk.Frame(root, bg=BG)
+        bar.pack(fill="x", padx=20, pady=14, side="bottom")
+        status = tk.Label(bar, text="", bg=BG, fg=DIM, font=("Segoe UI", 8))
+        status.pack(side="left")
+
+        def refresh():
+            h = fetch_history()
+            if h is None:
+                status.config(text="proxy not answering", fg=BAD)
+                return
+            win = h.get("windows") or {}
+            for c, key in ((1, "today"), (2, "week"), (3, "month")):
+                d = win.get(key) or {}
+                cells[(1, c)].config(text=f"{int(d.get('requests', 0)):,}")
+                cells[(2, c)].config(text=short_tokens(d.get("tokens_saved", 0)))
+                cells[(3, c)].config(text=f"{d.get('hit_pct', 0)}%")
+                cells[(4, c)].config(text=money(d.get("est_saved_usd", 0)))
+            days = h.get("days") or []
+            draw_bars(days)
+            status.config(text=f"{len(days)} day(s) recorded - reset never clears these",
+                          fg=DIM)
+
+        def close(_e=None):
+            _history_win["open"] = False
+            root.destroy()
+
+        for label, cmd in (("Close", close), ("Refresh", refresh)):
+            tk.Button(bar, text=label, command=cmd, font=("Segoe UI", 9), bg=FIELD,
+                      fg=FG, activebackground=TRACK, activeforeground=FG,
+                      relief="flat", bd=0, padx=12, pady=5, cursor="hand2"
+                      ).pack(side="right", padx=(8, 0))
+
+        root.protocol("WM_DELETE_WINDOW", close)
+        root.bind("<Escape>", close)
+        refresh()
         root.mainloop()
 
     threading.Thread(target=_run, daemon=True).start()
@@ -1113,6 +1252,7 @@ def main():
         pystray.Menu.SEPARATOR,
         pystray.MenuItem("Copy base URL", copy_base_url),
         pystray.MenuItem(overlay_label, on_toggle_overlay),
+        pystray.MenuItem("Usage history...", open_history_window),
         pystray.MenuItem("Settings...", open_settings_dialog),
         pystray.MenuItem(autostart_label, on_toggle_autostart),
         pystray.Menu.SEPARATOR,
