@@ -6,6 +6,9 @@ prompt cache warm so requests get ~30x cheaper.
 
 > Unofficial community tool. Not affiliated with OpenCode.
 
+![Flow: the request path drawn live, with light running along the wires and
+the log scrolling underneath](docs/flow.gif)
+
 ## What it fixes
 
 Third-party harnesses usually get four things wrong against the Go gateway:
