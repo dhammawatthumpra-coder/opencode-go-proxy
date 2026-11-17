@@ -137,6 +137,17 @@ def set_overlay_alpha(value):
         pass
 
 
+def save_overlay_pos(x, y):
+    """Remember where the card was dropped, so it opens there next time."""
+    try:
+        cfg = load_local_config()
+        cfg["overlay_pos"] = [int(x), int(y)]
+        with open(CONFIG_LOCAL_PATH, "w", encoding="utf-8") as f:
+            json.dump(cfg, f, indent=2)
+    except Exception:
+        pass
+
+
 def save_usage_key(key):
     cfg = load_local_config()
     if key:
@@ -492,12 +503,24 @@ def open_stats_overlay(ic=None, item=None):
         # card rather than a hole in the screen.
         root.attributes("-alpha", OVERLAY_ALPHA)
         root.configure(bg=BG, highlightthickness=1, highlightbackground=TRACK)
-        # Not winfo_screenwidth()-width: on a 125% display Tk reports the full
-        # 1536 px while the drawable coordinate space is only ~1229, so a
-        # right-edge placement lands off screen. A fraction is always visible
-        # and the card can be dragged anywhere. 0.58 keeps a 300 px card inside
-        # that 1229.
-        root.geometry(f"300x302+{int(root.winfo_screenwidth() * 0.58)}+48")
+        # Where the card opens: the position it was last dragged to, or a safe
+        # default. Not winfo_screenwidth()-width: on a 125% display Tk reports
+        # the full 1536 px while the drawable coordinate space is only ~1229,
+        # so a right-edge placement lands off screen. 0.58 keeps a 300 px card
+        # inside that 1229.
+        sw, sh = root.winfo_screenwidth(), root.winfo_screenheight()
+        saved = load_local_config().get("overlay_pos")
+        if (
+            isinstance(saved, list)
+            and len(saved) == 2
+            and all(isinstance(v, (int, float)) for v in saved)
+            and 0 <= saved[0] < sw - 80
+            and 0 <= saved[1] < sh - 80
+        ):
+            at = f"+{int(saved[0])}+{int(saved[1])}"
+        else:
+            at = f"+{int(sw * 0.58)}+48"
+        root.geometry(f"300x302{at}")
 
         def drag_start(e):
             root._drag = (e.x_root - root.winfo_x(), e.y_root - root.winfo_y())
@@ -505,6 +528,9 @@ def open_stats_overlay(ic=None, item=None):
         def drag_move(e):
             dx, dy = getattr(root, "_drag", (0, 0))
             root.geometry(f"+{e.x_root - dx}+{e.y_root - dy}")
+
+        def drag_end(_e=None):
+            save_overlay_pos(root.winfo_x(), root.winfo_y())
 
         def hide(_e=None):
             _stats_win["want"] = False
@@ -568,6 +594,7 @@ def open_stats_overlay(ic=None, item=None):
             w.bind("<Button-1>", drag_start)
             w.bind("<B1-Motion>", drag_move)
             w.bind("<Double-Button-1>", hide)
+        root.bind("<ButtonRelease-1>", drag_end)
         root.bind("<Escape>", hide)
 
         def fill_plan(acct):

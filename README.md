@@ -213,9 +213,9 @@ Note that `out` is 200x the price of a cached read, so a turn where the agent
 proxy prints a summary line every 10 turns.
 
 The tray app can put the same numbers on a small floating card
-(**Show stats overlay**): always on top, drag it anywhere, double-click or hit
-the ✕ to hide it, and the **⚙** opens Settings — usage key and opacity — without
-going back to the tray. It only reads `/__stats`, so it never touches the API key
+(**Show stats overlay**): always on top, drag it anywhere — it opens where you
+left it — double-click or hit the ✕ to hide it, and the **⚙** opens Settings —
+usage key and opacity — without going back to the tray. It only reads `/__stats`, so it never touches the API key
 or the upstream. Numbers are per proxy run and start from zero after a restart.
 
 ![Overlay settings window: usage API key field and the card opacity
