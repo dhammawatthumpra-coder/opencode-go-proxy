@@ -733,10 +733,10 @@ def on_toggle_overlay(ic, item):
 
 
 def open_settings_dialog(ic=None, item=None):
-    """The only settings surface: the read-only usage key and the card's
-    opacity. Reachable from the gear on the card and from the tray menu, so it
-    still works with the card hidden. Writes config.local.json (git-ignored)
-    and restarts the proxy so the child process picks up a new key."""
+    """One window for everything reachable from the card: the read-only usage
+    key, the card's opacity, and the proxy actions that also live in the tray
+    menu — which stays, for when the card is hidden or the tray is all there
+    is. Writes config.local.json (git-ignored)."""
     def _run():
         import tkinter as tk
 
@@ -746,13 +746,20 @@ def open_settings_dialog(ic=None, item=None):
         root.title("Overlay settings")
         root.configure(bg=BG)
         root.attributes("-topmost", True)
-        root.geometry("540x348")
+        root.geometry("560x432")
         root.resizable(False, False)
 
         def text(s, size=9, color=DIM, bold=False, pady=(0, 0)):
-            tk.Label(root, text=s, bg=BG, fg=color, justify="left", wraplength=504,
+            tk.Label(root, text=s, bg=BG, fg=color, justify="left", wraplength=524,
                      anchor="w", font=("Segoe UI", size, "bold" if bold else "normal")
                      ).pack(fill="x", padx=18, pady=pady)
+
+        def button(parent, label, cmd, width=None):
+            b = tk.Button(parent, text=label, command=cmd, font=("Segoe UI", 9),
+                          bg=FIELD, fg=FG, activebackground="#2a313c",
+                          activeforeground=FG, relief="flat", bd=0, padx=10, pady=4,
+                          cursor="hand2", width=width)
+            return b
 
         text("Usage API key", 11, FG, True, (16, 2))
         text("Create it at opencode.ai/console -> Account -> Personal API keys.\n"
@@ -810,18 +817,84 @@ def open_settings_dialog(ic=None, item=None):
         text("100% keeps the numbers readable. Lower values let the window behind "
              "show through the card.", 8, DIM, False, (6, 0))
 
-        def apply():
-            save_usage_key(entry.get().strip())
-            set_overlay_alpha(alpha.get() / 100)
-            root.destroy()
+        # The tray menu stays, but these are the same actions for when the card
+        # is what you are looking at.
+        text("Proxy", 11, FG, True, (0, 6))
+        state = tk.Label(root, text=status_line(), bg=BG, fg=DIM, anchor="w",
+                         font=("Consolas", 8))
+        state.pack(fill="x", padx=18)
+
+        row1 = tk.Frame(root, bg=BG)
+        row1.pack(fill="x", padx=18, pady=(6, 0))
+        button(row1, "Copy base URL", copy_base_url).pack(side="left", padx=(0, 8))
+        button(row1, "Live log", open_log_window).pack(side="left", padx=(0, 8))
+        button(row1, "Open folder", on_open_folder).pack(side="left")
+
+        row2 = tk.Frame(root, bg=BG)
+        row2.pack(fill="x", padx=18, pady=(6, 0))
+
+        def refresh():
+            state.config(text=status_line())
+            toggle_btn.config(text="Stop proxy" if ctl.enabled else "Start proxy")
+            try:
+                if icon:
+                    icon.update_menu()
+            except Exception:
+                pass
+
+        def restart():
             ctl.stop()
+            time.sleep(0.2)
             if ctl.enabled and ctl.wanted:
                 ctl.start()
-            if ic:
-                try:
-                    ic.update_menu()
-                except Exception:
-                    pass
+            refresh()
+
+        def toggle():
+            ctl.set_enabled(not ctl.enabled)
+            refresh()
+
+        button(row2, "Restart proxy", restart).pack(side="left", padx=(0, 8))
+        toggle_btn = button(row2, "Stop proxy" if ctl.enabled else "Start proxy", toggle)
+        toggle_btn.pack(side="left")
+
+        # A tick label rather than tk.Checkbutton: on this dark background the
+        # native indicator draws a dark mark in a dark box, so the state cannot
+        # be read at a glance.
+        auto = {"on": autostart_enabled()}
+
+        def auto_text():
+            return ("\u2713 " if auto["on"] else "\u2610 ") + "Start with Windows"
+
+        auto_btn = tk.Label(row2, text=auto_text(), bg=BG,
+                            fg=FG if auto["on"] else DIM,
+                            font=("Segoe UI", 9), cursor="hand2")
+        auto_btn.pack(side="right")
+
+        def toggle_auto(_e=None):
+            auto["on"] = not auto["on"]
+            set_autostart(auto["on"])
+            auto_btn.config(text=auto_text(), fg=FG if auto["on"] else DIM)
+            refresh()
+
+        auto_btn.bind("<Button-1>", toggle_auto)
+
+        def apply():
+            old = usage_key()
+            new = entry.get().strip()
+            save_usage_key(new)
+            set_overlay_alpha(alpha.get() / 100)
+            root.destroy()
+            # Only bounce the proxy when the key actually changed; opacity is
+            # read live by the card.
+            if new != old:
+                ctl.stop()
+                if ctl.enabled and ctl.wanted:
+                    ctl.start()
+            try:
+                if icon:
+                    icon.update_menu()
+            except Exception:
+                pass
 
         bar = tk.Frame(root, bg=BG)
         bar.pack(fill="x", padx=18, pady=16, side="bottom")
@@ -837,7 +910,7 @@ def open_settings_dialog(ic=None, item=None):
 
         for label, cmd in (("Cancel", root.destroy),
                            ("Reset stats", do_reset),
-                           ("Save & restart proxy", apply)):
+                           ("Save", apply)):
             tk.Button(bar, text=label, command=cmd, font=("Segoe UI", 9),
                       bg=FIELD, fg=FG, activebackground="#2a313c", activeforeground=FG,
                       relief="flat", bd=0, padx=12, pady=5, cursor="hand2"

@@ -52,8 +52,10 @@ it (set `overlay_show_on_start` to `false` if you would rather open it yourself)
 - **Copy base URL** — clipboard
 - **Show stats overlay** / **Hide stats overlay** — the floating card described
   under [Measured savings](#measured-savings)
-- **Settings...** — the same window as the ⚙ on the card: usage key and card
-  opacity, saved to the git-ignored `config.local.json`
+- **Settings...** — the same window as the ⚙ on the card: usage key, card
+  opacity, and the proxy actions (copy URL, live log, restart, start/stop,
+  auto-start). Everything here also exists in this menu, for when the card is
+  hidden.
 - **Auto-start with Windows: ON/OFF**
 - **Proxy control** → **Live log...** (real-time log with session id + cache hit
   per request), run hidden / in a console window, Start / Stop proxy, Restart proxy
@@ -219,12 +221,12 @@ The tray app can put the same numbers on a small floating card
 (**Show stats overlay**): always on top, drag it anywhere — it opens where you
 left it, including on a second screen; if that screen is no longer attached it
 falls back to the default corner rather than opening where nothing is drawn —
-double-click or hit the ✕ to hide it, and the **⚙** opens Settings — usage key
-and opacity — without going back to the tray. It only reads `/__stats`, so it never touches the API key
+double-click or hit the ✕ to hide it, and the **⚙** opens Settings — usage key,
+opacity and the proxy controls — without going back to the tray. It only reads `/__stats`, so it never touches the API key
 or the upstream. Numbers are per proxy run and start from zero after a restart.
 
-![Overlay settings window: usage API key field and the card opacity
-slider](docs/settings.png)
+![Overlay settings window: usage API key field, card opacity slider, and proxy
+controls](docs/settings.png)
 
 Opacity is 100 % by default, on purpose: at 93 %, 97 % and even 99 % the bright
 text of the window behind shows through and the numbers get hard to read. Pick a
