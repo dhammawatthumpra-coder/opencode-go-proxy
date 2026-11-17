@@ -1002,6 +1002,10 @@ def main():
     threading.Thread(target=port_watcher, daemon=True).start()
     threading.Thread(target=watchdog, daemon=True).start()
 
+    # The card is the point of the thing, so it is on unless told otherwise.
+    if CFG.get("overlay_show_on_start", True):
+        open_stats_overlay()
+
     proxy_menu = pystray.Menu(
         pystray.MenuItem("Live log...", open_log_window),
         pystray.MenuItem(mode_label, on_toggle_mode),

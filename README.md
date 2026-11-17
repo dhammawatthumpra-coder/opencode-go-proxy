@@ -44,7 +44,8 @@ cd path\to\opencode-go-proxy
 pythonw tray_app.py
 ```
 
-A green **GO** icon appears in the system tray:
+A green **GO** icon appears in the system tray and the stats card comes up with
+it (set `overlay_show_on_start` to `false` if you would rather open it yourself):
 
 - `● Go proxy: RUNNING (tray) :17387` — status (non-clickable)
 - `http://127.0.0.1:17387/v1` — the base URL to paste into your harness (non-clickable)
@@ -108,6 +109,7 @@ Key setup in the OpenCode Console:
   "session_mode": "conversation",
   "log_requests": true,
   "log_usage": true,
+  "overlay_show_on_start": true,
   "node_exe": "",
   "log_file": "logs/proxy.log"
 }
@@ -121,6 +123,7 @@ Key setup in the OpenCode Console:
 | `session_mode` | `conversation` (recommended) / `fixed` / `passthrough` |
 | `log_requests` | sets `LOG=1` |
 | `log_usage` | sets `USAGE=1` |
+| `overlay_show_on_start` | open the stats card when the tray starts (default `true`) |
 | `node_exe` | empty = auto-detect `node.exe` |
 | `log_file` | where the proxy writes its log (default `logs/proxy.log`, rotated at 5 MB) |
 

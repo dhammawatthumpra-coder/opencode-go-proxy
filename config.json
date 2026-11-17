@@ -5,6 +5,7 @@
   "session_mode": "conversation",
   "log_requests": true,
   "log_usage": true,
+  "overlay_show_on_start": true,
   "node_exe": "",
   "log_file": "logs/proxy.log"
 }
