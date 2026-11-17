@@ -8,7 +8,7 @@ prompt cache warm so requests get ~30x cheaper.
 
 ## What it fixes
 
-Third-party harnesses usually get three things wrong against the Go gateway:
+Third-party harnesses usually get four things wrong against the Go gateway:
 
 | Symptom in the harness | Cause | What the proxy does |
 |---|---|---|
@@ -71,7 +71,8 @@ node go-session-proxy.mjs --check oc_sk_xxxxxxxx
 ```
 
 Sends one minimal request per API shape and prints the real error, so you can
-tell a permission problem from a header problem:
+tell a permission problem from a header problem. `MODEL` picks the model it
+pokes (default `deepseek-v4.1-flash`):
 
 ```
 OK   OpenAI  /chat/completions + Bearer -> 200
@@ -341,7 +342,9 @@ the first one, which is confusing. The tray watchdog backs off (3 → 6 → 9 �
 - The optional `OPENCODE_GO_USAGE_KEY` is read from the environment (or a `.env`
   the tray loads) and is only ever sent as a bearer token to `<upstream>/usage`.
   It is never logged, and `/__stats` returns the plan numbers without it. Keep
-  it in a file **outside the repo**; `config.json` is tracked by git.
+  it out of `config.json`, which is tracked: the Settings window writes it to
+  `config.local.json`, which is git-ignored, and a `.env` outside the checkout
+  works too.
 - **`DUMP=1` logs the first 60 characters of your first user message.** It is a
   debugging aid; leave it off when sharing logs or recording your screen.
 - Anyone with local access to the machine can send requests through the proxy,
