@@ -111,8 +111,13 @@ const SESSION_HEADERS = [
 ];
 
 // Hop-by-hop headers must not be forwarded.
-const SKIP_REQ = new Set(["host", "connection", "keep-alive", "transfer-encoding", "upgrade", "content-length"]);
-const SKIP_RES = new Set(["connection", "keep-alive", "transfer-encoding", "upgrade", "content-length"]);
+const SKIP_REQ = new Set(["host", "connection", "keep-alive", "transfer-encoding", "upgrade", "content-length", "accept-encoding"]);
+// accept-encoding is dropped so undici negotiates and decodes the response
+// itself; the body we hand back is therefore decoded, and the upstream's
+// content-encoding header would make the caller decode it a second time.
+// Chromium harnesses ask for gzip on every request, so this broke them with
+// "Invalid response from model provider" while curl-style clients were fine.
+const SKIP_RES = new Set(["connection", "keep-alive", "transfer-encoding", "upgrade", "content-length", "content-encoding"]);
 
 const isAnthropicPath = (p) => /\/messages$/.test(p);
 const isOpenAIPath = (p) => /(\/chat\/completions|\/responses)$/.test(p);

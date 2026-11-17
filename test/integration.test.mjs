@@ -7,6 +7,7 @@
 import test, { before, after } from "node:test";
 import assert from "node:assert/strict";
 import http from "node:http";
+import zlib from "node:zlib";
 import path from "node:path";
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
@@ -21,14 +22,52 @@ let port;
 
 const usage = { prompt_tokens: 1000, prompt_cache_hit_tokens: 900, completion_tokens: 50 };
 
-function mockUpstream() {
-  return http.createServer((req, res) => {
-    let body = "";
-    req.on("data", (c) => (body += c));
+function body(messages, extra = {}) {
+  return JSON.stringify({ model: "m", messages, ...extra });
+}
+
+async function listen(handler) {
+  const srv = http.createServer(handler);
+  await new Promise((r) => srv.listen(0, "127.0.0.1", r));
+  return srv;
+}
+
+// A second proxy for tests that need a different upstream.
+async function startProxy(upstreamUrl) {
+  const child = spawn(process.execPath, [path.join(ROOT, "go-session-proxy.mjs")], {
+    env: {
+      ...process.env,
+      PORT: "0",
+      PORT_SCAN: "0",
+      UPSTREAM: upstreamUrl,
+      STATS_FILE: "",
+      USAGE: "1",
+    },
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  const port = await new Promise((resolve, reject) => {
+    let buf = "";
+    const timer = setTimeout(() => reject(new Error("proxy did not report a port")), 8000);
+    child.stdout.on("data", (d) => {
+      buf += d.toString();
+      const m = /RUNTIME_PORT=(\d+)/.exec(buf);
+      if (m) {
+        clearTimeout(timer);
+        resolve(Number(m[1]));
+      }
+    });
+  });
+  return { port, child };
+}
+
+before(async () => {
+  upstream = await listen((req, res) => {
+    let raw = "";
+    req.on("data", (c) => (raw += c));
     req.on("end", () => {
       let json = {};
       try {
-        json = JSON.parse(body || "{}");
+        json = JSON.parse(raw || "{}");
       } catch {}
       seen.push({ url: req.url, method: req.method, headers: req.headers, json });
 
@@ -43,42 +82,10 @@ function mockUpstream() {
       res.end(JSON.stringify({ choices: [{ message: { role: "assistant", content: "ok" } }], usage }));
     });
   });
-}
 
-function body(messages, extra = {}) {
-  return JSON.stringify({ model: "m", messages, ...extra });
-}
-
-before(async () => {
-  upstream = mockUpstream();
-  await new Promise((r) => upstream.listen(0, "127.0.0.1", r));
-  const up = upstream.address().port;
-
-  child = spawn(process.execPath, [path.join(ROOT, "go-session-proxy.mjs")], {
-    env: {
-      ...process.env,
-      PORT: "0",
-      PORT_SCAN: "0",
-      UPSTREAM: `http://127.0.0.1:${up}`,
-      STATS_FILE: "", // keep counters in memory, nothing written to the repo
-      USAGE: "1",
-    },
-    stdio: ["ignore", "pipe", "pipe"],
-  });
-
-  port = await new Promise((resolve, reject) => {
-    let buf = "";
-    const timer = setTimeout(() => reject(new Error("proxy did not report a port")), 8000);
-    child.stdout.on("data", (d) => {
-      buf += d.toString();
-      const m = /RUNTIME_PORT=(\d+)/.exec(buf);
-      if (m) {
-        clearTimeout(timer);
-        resolve(Number(m[1]));
-      }
-    });
-    child.on("exit", (code) => reject(new Error(`proxy exited early (${code})`)));
-  });
+  const started = await startProxy(`http://127.0.0.1:${upstream.address().port}`);
+  child = started.child;
+  port = started.port;
 });
 
 after(() => {
@@ -190,39 +197,14 @@ test("reset clears the counters but not the ledger", async () => {
 });
 
 test("a response with no usage is counted, not ignored", async () => {
-  const bare = http.createServer((req, res) => {
+  const bare = await listen((req, res) => {
     req.resume();
     req.on("end", () => {
       res.writeHead(200, { "content-type": "application/json" });
       res.end('{"choices":[{"message":{"content":"no usage here"}}]}');
     });
   });
-  await new Promise((r) => bare.listen(0, "127.0.0.1", r));
-
-  // point a second proxy at it rather than disturbing the one under test
-  const child2 = spawn(process.execPath, [path.join(ROOT, "go-session-proxy.mjs")], {
-    env: {
-      ...process.env,
-      PORT: "0",
-      PORT_SCAN: "0",
-      UPSTREAM: `http://127.0.0.1:${bare.address().port}`,
-      STATS_FILE: "",
-      USAGE: "1",
-    },
-    stdio: ["ignore", "pipe", "pipe"],
-  });
-  const p2 = await new Promise((resolve, reject) => {
-    let buf = "";
-    const t = setTimeout(() => reject(new Error("no port")), 8000);
-    child2.stdout.on("data", (d) => {
-      buf += d.toString();
-      const m = /RUNTIME_PORT=(\d+)/.exec(buf);
-      if (m) {
-        clearTimeout(t);
-        resolve(Number(m[1]));
-      }
-    });
-  });
+  const { port: p2, child: child2 } = await startProxy(`http://127.0.0.1:${bare.address().port}`);
 
   await fetch(`http://127.0.0.1:${p2}/v1/chat/completions`, {
     method: "POST",
@@ -236,4 +218,40 @@ test("a response with no usage is counted, not ignored", async () => {
 
   child2.kill();
   bare.close();
+});
+
+test("a gzip response is decoded before the caller sees it", async () => {
+  // Chromium harnesses ask for gzip on every request. undici decodes the body
+  // for us, so forwarding the upstream's content-encoding header made the
+  // caller decompress plain text and report "Invalid response from provider".
+  const payload = JSON.stringify({
+    choices: [{ message: { role: "assistant", content: "gz" } }],
+    usage,
+  });
+  const gz = zlib.gzipSync(payload);
+  const gzUp = await listen((req, res) => {
+    req.resume();
+    req.on("end", () => {
+      res.writeHead(200, { "content-type": "application/json", "content-encoding": "gzip" });
+      res.end(gz);
+    });
+  });
+  const { port: p3, child: child3 } = await startProxy(`http://127.0.0.1:${gzUp.address().port}`);
+
+  const r = await fetch(`http://127.0.0.1:${p3}/v1/chat/completions`, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "accept-encoding": "gzip, deflate, br",
+      authorization: `Bearer ${KEY}`,
+    },
+    body: body([{ role: "user", content: "gz" }]),
+  });
+
+  assert.equal(r.headers.get("content-encoding"), null, "the header is gone");
+  const json = await r.json(); // throws if the body were still gzipped
+  assert.equal(json.choices[0].message.content, "gz");
+
+  child3.kill();
+  gzUp.close();
 });
