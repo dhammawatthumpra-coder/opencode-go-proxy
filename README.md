@@ -123,7 +123,8 @@ Key setup in the OpenCode Console:
 
 When running the `.mjs` directly, the same options are environment variables:
 `PORT`, `PORT_SCAN`, `UPSTREAM`, `SESSION_MODE`, `OPENCODE_SESSION`, `LOG`,
-`USAGE`, `DUMP`, `PRICE_CACHE`, `PRICE_MISS`, `PRICE_OUT`.
+`USAGE`, `DUMP`, `PRICE_CACHE`, `PRICE_MISS`, `PRICE_OUT`,
+`OPENCODE_GO_USAGE_KEY`.
 
 The tray app reads only the fields listed above; the `PRICE_*` overrides have no
 `config.json` equivalent yet and must be set in the environment.
@@ -225,7 +226,8 @@ the upstream. Numbers are per proxy run and start from zero after a restart.
   "est_cost_usd": 0.000477,
   "est_cost_without_cache_usd": 0.0018,
   "est_saved_usd": 0.001323,
-  "prices_per_1m": { "cache_read": 0.003, "cache_miss": 0.15, "output": 0.6 }
+  "prices_per_1m": { "cache_read": 0.003, "cache_miss": 0.15, "output": 0.6 },
+  "account": null
 }
 ```
 
@@ -234,6 +236,43 @@ the cheap rate instead of the full input rate. The `est_*` costs are estimates
 from the price table above — override them with `PRICE_CACHE`, `PRICE_MISS`,
 `PRICE_OUT` (per 1M tokens) when your model is priced differently. Counters are
 in memory and reset when the proxy restarts.
+
+### Plan meters (optional)
+
+With a **Usage: Read** key the card also shows the plan's own windows, which is
+the number the provider bills against:
+
+```
+5-hour window  [6% used]              Resets in 2h 47m
+▓▓▓░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░
+```
+
+Put the key in a `.env` **outside the repo** — either beside the proxy or one
+directory up, so `D:\tunnel\.env` works for a checkout in
+`D:\tunnel\opencodeproxy`:
+
+```
+OPENCODE_GO_USAGE_KEY=oc_sk_...
+```
+
+The tray loads that file at start and hands the variable to the proxy; the proxy
+only ever reads it from the environment, so a direct `node` run can use
+`node --env-file=../.env go-session-proxy.mjs`. Create the key with
+`Models: none` and `Usage: Read` — it cannot call a model, which is the point.
+
+The call is `GET <upstream>/usage`; the response is
+
+```json
+{"usage":{"rolling":{"status":"ok","percent":3,"resetsAt":"2026-11-17T04:59:19Z"},
+          "weekly":{...},"monthly":{...}}}
+```
+
+`percent` is the share **used**, not the share left, and `status` is `ok` until a
+window is `rate-limited` (the card turns that row red). The proxy refreshes it at
+most once a minute and serves the last good value from `/__stats` as
+`account.windows`, with `error` and `age_seconds` so a stale number is visible as
+stale. The key is never logged. No key → the rows show `—`; a 401 or a timeout →
+`plan meters unavailable`.
 
 ## Troubleshooting
 
@@ -257,6 +296,10 @@ the first one, which is confusing. The tray watchdog backs off (3 → 6 → 9 �
 - The proxy binds to **`127.0.0.1` only** and is not reachable from the network.
 - It **never stores or logs the API key** — the key travels from the caller
   straight to the upstream.
+- The optional `OPENCODE_GO_USAGE_KEY` is read from the environment (or a `.env`
+  the tray loads) and is only ever sent as a bearer token to `<upstream>/usage`.
+  It is never logged, and `/__stats` returns the plan numbers without it. Keep
+  it in a file **outside the repo**; `config.json` is tracked by git.
 - **`DUMP=1` logs the first 60 characters of your first user message.** It is a
   debugging aid; leave it off when sharing logs or recording your screen.
 - Anyone with local access to the machine can send requests through the proxy,

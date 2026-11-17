@@ -73,6 +73,19 @@ const stats = { requests: 0, window: 0, sessions: new Set(), hit: 0, miss: 0, in
 
 const round6 = (n) => Number(n.toFixed(6));
 
+// Optional: a key holding the Usage: Read permission. When present the proxy
+// reports the plan's own meters (5h / weekly / monthly), refreshed at most once
+// a minute, so the overlay can show the real quota next to the numbers measured
+// here. The route sits beside /chat/completions on the same base and its
+// `percent` is the share USED, not the share left. The key is never logged.
+const USAGE_KEY = process.env.OPENCODE_GO_USAGE_KEY ?? "";
+const USAGE_URL = UPSTREAM + "/usage";
+const USAGE_TTL = 60_000;
+let account = null; // last good payload
+let accountAt = 0;
+let accountErr = null;
+let accountBusy = false;
+
 // Header names the Go gateway accepts as a session id.
 const SESSION_HEADERS = [
   "x-opencode-session",
@@ -303,6 +316,53 @@ function statsView() {
   };
 }
 
+// GET {base}/usage -> { usage: { rolling|weekly|monthly: { status, percent, resetsAt } } }
+// Flattened on the way in so consumers never have to know the upstream spelling.
+async function refreshAccount() {
+  if (!USAGE_KEY || accountBusy) return;
+  accountBusy = true;
+  try {
+    const r = await fetch(USAGE_URL, {
+      headers: { accept: "application/json", authorization: `Bearer ${USAGE_KEY}` },
+      signal: AbortSignal.timeout(8000),
+    });
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    const json = await r.json();
+    const out = {};
+    for (const [k, v] of Object.entries(json?.usage ?? {})) {
+      out[k] = {
+        percent_used: typeof v?.percent === "number" ? v.percent : null,
+        status: v?.status ?? null,
+        resets_at: v?.resetsAt ?? null,
+      };
+    }
+    if (!Object.keys(out).length) throw new Error("no usage windows in response");
+    account = out;
+    accountAt = Date.now();
+    if (accountErr) console.log("usage: plan meters back");
+    accountErr = null;
+  } catch (err) {
+    const msg = String(err?.message ?? err);
+    if (msg !== accountErr) console.log(`usage: plan meters unavailable (${msg})`);
+    accountErr = msg;
+  } finally {
+    accountBusy = false;
+  }
+}
+
+// Never blocks the caller: a stale card is better than a 8 s hang on /__stats.
+function accountView() {
+  if (!USAGE_KEY) return null;
+  if (!accountBusy && Date.now() - accountAt > USAGE_TTL) void refreshAccount();
+  return {
+    endpoint: USAGE_URL,
+    percent_means: "used",
+    windows: account,
+    error: accountErr,
+    age_seconds: accountAt ? Math.round((Date.now() - accountAt) / 1000) : null,
+  };
+}
+
 const MAX_BODY = 64 * 1024 * 1024;
 
 function readBody(req) {
@@ -326,8 +386,10 @@ function readBody(req) {
 const server = http.createServer(async (req, res) => {
   // Local-only reporting endpoint; never forwarded upstream.
   if (req.method === "GET" && String(req.url).replace(/\?.*$/, "").replace(/\/+$/, "") === "/__stats") {
+    const view = statsView();
+    view.account = accountView();
     res.writeHead(200, { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" });
-    res.end(JSON.stringify(statsView(), null, 2));
+    res.end(JSON.stringify(view, null, 2));
     return;
   }
 

@@ -28,6 +28,7 @@ import sys
 import threading
 import time
 import urllib.request
+from datetime import datetime, timezone
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 PROXY_JS = os.path.join(BASE_DIR, "go-session-proxy.mjs")
@@ -60,6 +61,36 @@ def load_config():
             pass
     return {}
 
+
+def load_env_file():
+    """KEY=VALUE pairs from a .env beside the proxy, or one directory up.
+
+    Only fills variables that are not already set, so a real environment always
+    wins. Used for OPENCODE_GO_USAGE_KEY, which lives outside the repo and is
+    handed to the child process through os.environ.
+    """
+    parent = os.path.dirname(BASE_DIR)
+    for path in (os.path.join(BASE_DIR, ".env"), os.path.join(parent, ".env")):
+        if not os.path.exists(path):
+            continue
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                for line in f:
+                    line = line.strip()
+                    if not line or line.startswith("#") or "=" not in line:
+                        continue
+                    k, _, v = line.partition("=")
+                    k = k.strip()
+                    v = v.strip().strip('"').strip("'")
+                    if k and k not in os.environ:
+                        os.environ[k] = v
+        except Exception:
+            pass
+        return
+
+
+load_env_file()
+USAGE_KEY_SET = bool(os.environ.get("OPENCODE_GO_USAGE_KEY"))
 
 CFG = load_config()
 PORT = int(CFG.get("port", 17387))
@@ -349,6 +380,29 @@ def short_tokens(n):
     return str(n)
 
 
+def resets_in(iso, now=None):
+    """'Resets in 2h 53m' from an ISO timestamp, or '' when it is unusable."""
+    if not iso:
+        return ""
+    try:
+        t = datetime.fromisoformat(str(iso).replace("Z", "+00:00"))
+        if t.tzinfo is None:
+            t = t.replace(tzinfo=timezone.utc)
+        secs = int((t - (now or datetime.now(timezone.utc))).total_seconds())
+    except Exception:
+        return ""
+    if secs <= 0:
+        return "resetting"
+    days, rem = divmod(secs, 86400)
+    hours, rem = divmod(rem, 3600)
+    mins = rem // 60
+    if days:
+        return f"Resets in {days}d {hours}h"
+    if hours:
+        return f"Resets in {hours}h {mins}m"
+    return f"Resets in {mins}m"
+
+
 def open_stats_overlay(ic=None, item=None):
     _stats_win["want"] = True
     if _stats_win["open"]:
@@ -359,6 +413,7 @@ def open_stats_overlay(ic=None, item=None):
         import tkinter as tk
 
         BG, DIM, FG, GOOD, BAD = "#0e1116", "#7d8695", "#e6edf3", "#22c55e", "#ef4444"
+        TRACK, BADGE = "#2a313c", "#12261a"
 
         root = tk.Tk()
         root.overrideredirect(True)
@@ -368,12 +423,13 @@ def open_stats_overlay(ic=None, item=None):
         # to read. The hairline border is what keeps it looking like a floating
         # card rather than a hole in the screen.
         root.attributes("-alpha", 1.0)
-        root.configure(bg=BG, highlightthickness=1, highlightbackground="#2a313c")
-        # Not winfo_screenwidth()-272: on a 125% display Tk reports the full
+        root.configure(bg=BG, highlightthickness=1, highlightbackground=TRACK)
+        # Not winfo_screenwidth()-width: on a 125% display Tk reports the full
         # 1536 px while the drawable coordinate space is only ~1229, so a
         # right-edge placement lands off screen. A fraction is always visible
-        # and the card can be dragged anywhere.
-        root.geometry(f"252x164+{int(root.winfo_screenwidth() * 0.62)}+48")
+        # and the card can be dragged anywhere. 0.58 keeps a 300 px card inside
+        # that 1229.
+        root.geometry(f"300x302+{int(root.winfo_screenwidth() * 0.58)}+48")
 
         def drag_start(e):
             root._drag = (e.x_root - root.winfo_x(), e.y_root - root.winfo_y())
@@ -404,11 +460,61 @@ def open_stats_overlay(ic=None, item=None):
                         font=("Consolas", 9), justify="left")
         body.pack(pady=(6, 0))
 
+        # Plan meters, straight from GET {base}/usage: label, "% used" badge,
+        # reset countdown and a bar. Drawn once and updated in place, because
+        # rebuilding widgets every 800 ms flickers and leaks.
+        tk.Frame(root, bg=TRACK, height=1).pack(fill="x", padx=14, pady=(8, 9))
+
+        plan = tk.Frame(root, bg=BG)
+        plan.pack(fill="x", padx=14)
+
+        rows = {}
+        for key, title in (("rolling", "5-hour window"), ("weekly", "Weekly"),
+                           ("monthly", "Monthly")):
+            row = tk.Frame(plan, bg=BG)
+            row.pack(fill="x", pady=(0, 9))
+            top = tk.Frame(row, bg=BG)
+            top.pack(fill="x")
+            tk.Label(top, text=title, bg=BG, fg=FG,
+                     font=("Segoe UI", 8, "bold")).pack(side="left")
+            badge = tk.Label(top, text="\u2014", bg=BADGE, fg=GOOD,
+                             font=("Segoe UI", 7, "bold"), padx=5)
+            badge.pack(side="left", padx=(6, 0))
+            resets = tk.Label(top, text="", bg=BG, fg=DIM, font=("Segoe UI", 7))
+            resets.pack(side="right")
+            track = tk.Frame(row, bg=TRACK, height=4)
+            track.pack(fill="x", pady=(4, 0))
+            track.pack_propagate(False)
+            fill = tk.Frame(track, bg=GOOD)
+            fill.place(x=0, y=0, relheight=1, relwidth=0)
+            rows[key] = (badge, resets, fill)
+
+        hint = tk.Label(root, text="", bg=BG, fg=DIM, font=("Segoe UI", 7))
+        hint.pack(pady=(0, 8))
+
         for w in (root, head, dot, big, body):
             w.bind("<Button-1>", drag_start)
             w.bind("<B1-Motion>", drag_move)
             w.bind("<Double-Button-1>", hide)
         root.bind("<Escape>", hide)
+
+        def fill_plan(acct):
+            windows = (acct or {}).get("windows") or {}
+            for key, (badge, resets, fill) in rows.items():
+                w = windows.get(key) or {}
+                pct = w.get("percent_used")
+                if pct is None:
+                    badge.config(text="\u2014", fg=DIM)
+                    resets.config(text="")
+                    fill.place_configure(relwidth=0)
+                    continue
+                pct = max(0.0, min(100.0, float(pct)))
+                limited = (w.get("status") or "ok") != "ok"
+                tint = BAD if limited else GOOD
+                badge.config(text=f"{pct:.0f}% used", fg=tint)
+                resets.config(text=resets_in(w.get("resets_at")), fg=BAD if limited else DIM)
+                fill.config(bg=tint)
+                fill.place_configure(relwidth=pct / 100)
 
         def tick():
             if not _stats_win["open"]:
@@ -424,6 +530,8 @@ def open_stats_overlay(ic=None, item=None):
                 dot.config(fg=BAD)
                 big.config(text="\u2014", fg=DIM)
                 body.config(text=f"proxy not answering\n127.0.0.1:{RUNTIME['port'] or PORT}", fg=DIM)
+                fill_plan(None)
+                hint.config(text="")
             else:
                 dot.config(fg=GOOD)
                 big.config(text=f"{s.get('hit_pct', 0)}%", fg=FG)
@@ -435,6 +543,14 @@ def open_stats_overlay(ic=None, item=None):
                     ),
                     fg=DIM,
                 )
+                acct = s.get("account")
+                fill_plan(acct)
+                if acct is None:
+                    hint.config(text="OPENCODE_GO_USAGE_KEY not set")
+                elif acct.get("error"):
+                    hint.config(text="plan meters unavailable")
+                else:
+                    hint.config(text="")
             root.after(800, tick)
 
         def on_destroy():
