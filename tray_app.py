@@ -137,6 +137,39 @@ def set_overlay_alpha(value):
         pass
 
 
+def dark_title_bar(root):
+    """Ask DWM to draw this window's title bar dark.
+
+    Tk has no say in the caption colour; Windows 11 exposes it through
+    DwmSetWindowAttribute. Attribute 20 is the current one, 19 the
+    pre-2004 id. Failures are ignored - a light title bar is only cosmetic.
+    """
+    if sys.platform != "win32":
+        return
+
+    def apply():
+        try:
+            import ctypes
+
+            hwnd = ctypes.windll.user32.GetParent(root.winfo_id())
+            on = ctypes.c_int(1)
+            for attr in (20, 19):
+                if ctypes.windll.dwmapi.DwmSetWindowAttribute(
+                    hwnd, attr, ctypes.byref(on), ctypes.sizeof(on)
+                ) == 0:
+                    break
+        except Exception:
+            pass
+
+    # Deferred and repeated: set before the window is mapped, Windows drops it,
+    # and a slow first paint can land after the first attempt.
+    try:
+        for delay in (100, 400, 1200):
+            root.after(delay, apply)
+    except Exception:
+        pass
+
+
 def watch_alpha(root):
     """Keep a window's alpha in step with the one shared setting.
 
@@ -448,6 +481,7 @@ def open_log_window(ic=None, item=None):
         root = tk.Tk()
         root.title("OpenCode Go Proxy - Live Log")
         root.geometry("950x620")
+        dark_title_bar(root)
 
         txt = ScrolledText(root, state="disabled",
                            font=("Consolas", 9), bg="#1e1e1e", fg="#d4d4d4")
@@ -769,9 +803,10 @@ def open_settings_dialog(ic=None, item=None):
         root = tk.Tk()
         root.title("Overlay settings")
         root.configure(bg=BG)
+        dark_title_bar(root)
         root.attributes("-topmost", True)
         root.attributes("-alpha", OVERLAY_ALPHA)
-        root.geometry("560x432" + (saved_pos("settings_pos") or f"+{int(root.winfo_screenwidth() * 0.40)}+110"))
+        root.geometry("560x452" + (saved_pos("settings_pos") or f"+{int(root.winfo_screenwidth() * 0.40)}+110"))
         root.resizable(False, False)
         watch_alpha(root)
 
@@ -1004,6 +1039,7 @@ def open_history_window(ic=None, item=None):
         root = tk.Tk()
         root.title("Usage history")
         root.configure(bg=BG)
+        dark_title_bar(root)
         root.attributes("-topmost", True)
         root.attributes("-alpha", OVERLAY_ALPHA)
         root.geometry(
