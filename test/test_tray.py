@@ -36,6 +36,18 @@ class Helpers(unittest.TestCase):
         self.assertEqual(f(0.1), 0.3)
         self.assertEqual(f("nonsense"), 1.0)
 
+    def test_pos_is_visible(self):
+        one = [(0, 0, 1536, 960)]
+        two = one + [(1920, 0, 2560, 1440)]
+
+        self.assertTrue(tray_app.pos_is_visible(300, 200, one))
+        self.assertTrue(tray_app.pos_is_visible(4137, 1078, two), "second screen")
+        self.assertFalse(
+            tray_app.pos_is_visible(4137, 1078, one), "that screen was unplugged"
+        )
+        self.assertFalse(tray_app.pos_is_visible(-400, 200, one), "off to the left")
+        self.assertFalse(tray_app.pos_is_visible(300, -200, one), "above the screen")
+
     def test_short_tokens(self):
         f = tray_app.short_tokens
         self.assertEqual(f(999), "999")

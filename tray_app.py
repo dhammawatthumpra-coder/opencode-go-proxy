@@ -137,6 +137,53 @@ def set_overlay_alpha(value):
         pass
 
 
+def monitor_rects():
+    """(x, y, w, h) for every attached monitor, or [] when unknown.
+
+    Win32 in a DPI-unaware process reports the same coordinates Tk's geometry
+    uses, which is the space a saved card position lives in.
+    """
+    if sys.platform != "win32":
+        return []
+    try:
+        import ctypes
+        from ctypes import wintypes
+
+        found = []
+        proc = ctypes.WINFUNCTYPE(
+            ctypes.c_int, ctypes.c_void_p, ctypes.c_void_p,
+            ctypes.POINTER(wintypes.RECT), ctypes.c_double,
+        )
+
+        def each(_hmon, _hdc, lprect, _lparam):
+            r = lprect.contents
+            found.append((r.left, r.top, r.right - r.left, r.bottom - r.top))
+            return 1
+
+        ctypes.windll.user32.EnumDisplayMonitors(None, None, proc(each), 0)
+        return found
+    except Exception:
+        return []
+
+
+def pos_is_visible(x, y, rects=None):
+    """True when the card's grab strip would land on an attached monitor.
+
+    A position saved on a second screen is fine until that screen is
+    unplugged: the card would still exist but nothing would draw it. In that
+    case the caller falls back to the default corner. Without a monitor list
+    (no Win32) the saved position is trusted.
+    """
+    rl = monitor_rects() if rects is None else rects
+    if not rl:
+        return True
+    grab_x, grab_y = x + 60, y + 15  # the header is what you only need to reach
+    for mx, my, mw, mh in rl:
+        if mx <= grab_x <= mx + mw and my <= grab_y <= my + mh:
+            return True
+    return False
+
+
 def save_overlay_pos(x, y):
     """Remember where the card was dropped, so it opens there next time."""
     try:
@@ -508,14 +555,13 @@ def open_stats_overlay(ic=None, item=None):
         # the full 1536 px while the drawable coordinate space is only ~1229,
         # so a right-edge placement lands off screen. 0.58 keeps a 300 px card
         # inside that 1229.
-        sw, sh = root.winfo_screenwidth(), root.winfo_screenheight()
+        sw = root.winfo_screenwidth()
         saved = load_local_config().get("overlay_pos")
         if (
             isinstance(saved, list)
             and len(saved) == 2
             and all(isinstance(v, (int, float)) for v in saved)
-            and 0 <= saved[0] < sw - 80
-            and 0 <= saved[1] < sh - 80
+            and pos_is_visible(int(saved[0]), int(saved[1]))
         ):
             at = f"+{int(saved[0])}+{int(saved[1])}"
         else:
