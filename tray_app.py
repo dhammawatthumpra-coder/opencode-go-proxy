@@ -428,6 +428,17 @@ def fetch_stats():
         return None
 
 
+def reset_stats():
+    """Zero the counters this proxy collected (POST /__stats/reset)."""
+    url = f"http://127.0.0.1:{RUNTIME['port'] or PORT}/__stats/reset"
+    try:
+        req = urllib.request.Request(url, method="POST", data=b"")
+        with urllib.request.urlopen(req, timeout=3) as r:
+            return 200 <= r.status < 300
+    except Exception:
+        return False
+
+
 def short_tokens(n):
     n = int(n or 0)
     if n >= 1_000_000:
@@ -617,6 +628,10 @@ def open_stats_overlay(ic=None, item=None):
                     hint.config(text="no usage key - add one from the tray menu")
                 elif acct.get("error"):
                     hint.config(text="plan meters unavailable")
+                elif s.get("responses_without_usage"):
+                    hint.config(
+                        text=f"{s['responses_without_usage']} responses had no usage - totals may be low"
+                    )
                 else:
                     hint.config(text="")
             root.after(800, tick)
@@ -653,7 +668,7 @@ def open_settings_dialog(ic=None, item=None):
         import tkinter as tk
 
         BG, DIM, FG, FIELD = "#0e1116", "#7d8695", "#e6edf3", "#161b22"
-        GOOD = "#22c55e"
+        GOOD, BAD = "#22c55e", "#ef4444"
         root = tk.Tk()
         root.title("Overlay settings")
         root.configure(bg=BG)
@@ -737,7 +752,19 @@ def open_settings_dialog(ic=None, item=None):
 
         bar = tk.Frame(root, bg=BG)
         bar.pack(fill="x", padx=18, pady=16, side="bottom")
-        for label, cmd in (("Cancel", root.destroy), ("Save & restart proxy", apply)):
+
+        status = tk.Label(bar, text="", bg=BG, fg=GOOD, font=("Segoe UI", 8))
+        status.pack(side="left")
+
+        def do_reset():
+            ok = reset_stats()
+            status.config(text="stats reset" if ok else "proxy not answering",
+                          fg=GOOD if ok else BAD)
+            root.after(3000, lambda: status.config(text=""))
+
+        for label, cmd in (("Cancel", root.destroy),
+                           ("Reset stats", do_reset),
+                           ("Save & restart proxy", apply)):
             tk.Button(bar, text=label, command=cmd, font=("Segoe UI", 9),
                       bg=FIELD, fg=FG, activebackground="#2a313c", activeforeground=FG,
                       relief="flat", bd=0, padx=12, pady=5, cursor="hand2"

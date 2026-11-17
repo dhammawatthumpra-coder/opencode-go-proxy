@@ -126,7 +126,7 @@ Key setup in the OpenCode Console:
 When running the `.mjs` directly, the same options are environment variables:
 `PORT`, `PORT_SCAN`, `UPSTREAM`, `SESSION_MODE`, `OPENCODE_SESSION`, `LOG`,
 `USAGE`, `DUMP`, `PRICE_CACHE`, `PRICE_MISS`, `PRICE_OUT`,
-`OPENCODE_GO_USAGE_KEY`.
+`OPENCODE_GO_USAGE_KEY`, `STATS_FILE`.
 
 The tray app reads only the fields listed above; the `PRICE_*` overrides have no
 `config.json` equivalent yet and must be set in the environment.
@@ -167,6 +167,13 @@ then exits with `EADDRINUSE` and the tray watchdog backs off instead of looping.
 | `conversation` | id = hash of system + first user message. Stable across turns of one chat, different per chat. Overrides any client-sent id, because an id that changes per request is what kills cache affinity. Two chats that open with the same first message would collide, so if a conversation that was already several messages in suddenly presents a single message it gets a `_r1` id of its own. A single-message repeat is left alone, since that is a retry of the opening turn. |
 | `fixed` | one id for every request |
 | `passthrough` | never touch a session header the client sends |
+
+**Compaction.** When the harness summarises a long history it drops the first
+user message, which is exactly what the id is built from — the route would move
+and the cache would go cold. So if a request carries a user message last seen in
+a conversation active within the last 30 minutes, it keeps that conversation's
+id. Different chats still get different ids, and a chat that simply starts with
+the same opener is still rotated.
 
 ## Reading the log
 
@@ -238,6 +245,8 @@ weekly and monthly plan meters](docs/stats-overlay.png)
   "est_cost_without_cache_usd": 0.0018,
   "est_saved_usd": 0.001323,
   "prices_per_1m": { "cache_read": 0.003, "cache_miss": 0.15, "output": 0.6 },
+  "since": "2026-11-17T03:19:14.342Z",
+  "responses_without_usage": 0,
   "account": null
 }
 ```
@@ -245,8 +254,15 @@ weekly and monthly plan meters](docs/stats-overlay.png)
 `tokens_saved` is the cached-read count: every one of those tokens was billed at
 the cheap rate instead of the full input rate. The `est_*` costs are estimates
 from the price table above — override them with `PRICE_CACHE`, `PRICE_MISS`,
-`PRICE_OUT` (per 1M tokens) when your model is priced differently. Counters are
-in memory and reset when the proxy restarts.
+`PRICE_OUT` (per 1M tokens) when your model is priced differently.
+
+Counters survive a restart: they are written to `logs/stats.json` and read back
+on start (`STATS_FILE=` keeps them in memory only). `POST /__stats/reset` zeroes
+them — the Settings window has a **Reset stats** button for that.
+
+`responses_without_usage` counts replies that carried no usage block at all.
+Those are not errors, but they leave the totals low; the proxy warns once in the
+log and the card says so instead of quietly showing a hit rate that looks broken.
 
 ### Plan meters (optional)
 
@@ -291,6 +307,15 @@ most once a minute and serves the last good value from `/__stats` as
 stale. The key is never logged. No key → the rows show `—`; a 401 or a timeout →
 `plan meters unavailable`.
 
+## Tests
+
+Neither suite touches the network, starts the proxy, or needs a display.
+
+```bash
+node --test test/proxy.test.mjs        # path folding, session ids, compaction, cost maths
+python -m unittest discover -s test    # tray helpers; skipped if pystray is missing
+```
+
 ## Troubleshooting
 
 | Error | Meaning | Fix |
@@ -331,7 +356,9 @@ the first one, which is confusing. The tray watchdog backs off (3 → 6 → 9 �
 | `config.json` | settings |
 | `start_tray.bat` / `start_console.bat` | launchers |
 | `requirements.txt` | Python deps for the tray only |
+| `test/` | both suites (see [Tests](#tests)) |
 | `logs/proxy.log` | proxy log, rotated at 5 MB (git-ignored) |
+| `logs/stats.json` | persisted counters (git-ignored) |
 
 ## License
 

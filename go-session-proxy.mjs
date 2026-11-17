@@ -50,8 +50,11 @@
 
 import http from "node:http";
 import crypto from "node:crypto";
+import fs from "node:fs";
+import path from "node:path";
 import { Readable, Transform } from "node:stream";
 import { StringDecoder } from "node:string_decoder";
+import { pathToFileURL } from "node:url";
 
 const PREFERRED_PORT = Number(process.env.PORT ?? 17387);
 const PORT_SCAN = Number(process.env.PORT_SCAN ?? 20);
@@ -69,7 +72,14 @@ const PRICE_MISS = Number(process.env.PRICE_MISS ?? 0.15);
 const PRICE_OUT = Number(process.env.PRICE_OUT ?? 0.6);
 
 // Running totals, served on GET /__stats and in a summary line every 10 turns.
-const stats = { requests: 0, window: 0, sessions: new Set(), hit: 0, miss: 0, input: 0, output: 0 };
+// Persisted so a tray restart does not wipe the numbers; the tray restarts a
+// lot. STATS_FILE= (empty) keeps them in memory only.
+const STATS_FILE = process.env.STATS_FILE ?? path.join("logs", "stats.json");
+const stats = {
+  requests: 0, window: 0, sessions: new Set(),
+  hit: 0, miss: 0, input: 0, output: 0,
+  noUsage: 0, since: Date.now(),
+};
 
 const round6 = (n) => Number(n.toFixed(6));
 
@@ -161,8 +171,24 @@ function analyzeConversation(body) {
   const head = [sys, anchor.content ?? anchor];
   const id = `ses_${crypto.createHash("sha256").update(JSON.stringify(head)).digest("hex").slice(0, 32)}`;
 
+  // Hashes of the user turns, so touchSession can tell "history was summarised"
+  // apart from "this is a different chat": a compacted request drops the first
+  // message but still contains the recent ones.
+  const userHash = (m) =>
+    crypto.createHash("sha256").update(JSON.stringify(m.content ?? m)).digest("hex").slice(0, 16);
+  const userHashes = new Set();
+  let lastUser = null;
+  for (const m of msgs) {
+    if (m && m.role === "user") {
+      lastUser = userHash(m);
+      userHashes.add(lastUser);
+    }
+  }
+
   return {
     id,
+    lastUser,
+    userHashes,
     debug: {
       msgs: msgs.length,
       sysLen: sys == null ? 0 : JSON.stringify(sys).length,
@@ -179,22 +205,53 @@ function analyzeConversation(body) {
 // also what a retry of the opening turn looks like and a retry should reuse
 // the cache. Sliding-window harnesses never drop to one message, so they are
 // unaffected.
+//
+// The other way the id moves is compaction: the harness replaces the history it
+// sent with a summary, so the first user message - the anchor the id is built
+// from - is gone. The recent turns usually survive, so if a request carries a
+// user message we last saw in a conversation still active a moment ago, that is
+// the same chat continuing and it keeps its route instead of paying for a cold
+// prompt cache.
 const affinity = new Map();
+const COMPACT_TTL = 30 * 60_000;
+const AFFINITY_MAX = 500;
 
-function touchSession(base, msgs) {
+function touchSession(base, conv, now = Date.now()) {
   if (!base) return null;
-  let e = affinity.get(base);
-  if (!e) {
-    e = { id: base, msgs: msgs ?? 0, rot: 0 };
-    affinity.set(base, e);
-  } else if (msgs === 1 && e.msgs > 1) {
-    e.rot += 1;
-    e.id = `${base}_r${e.rot}`;
+  const msgs = conv?.debug?.msgs ?? 0;
+  const lastUser = conv?.lastUser ?? null;
+
+  const e = affinity.get(base);
+  if (e) {
+    if (msgs === 1 && e.msgs > 1) {
+      e.rot += 1;
+      e.id = `${base}_r${e.rot}`;
+    }
     e.msgs = msgs;
-  } else if (msgs != null) {
-    e.msgs = msgs;
+    e.at = now;
+    if (lastUser) e.lastUser = lastUser;
+    return e.id;
   }
-  return e.id;
+
+  let reused = null;
+  for (const c of affinity.values()) {
+    if (now - c.at > COMPACT_TTL || !c.lastUser) continue;
+    if (!conv?.userHashes?.has(c.lastUser)) continue;
+    if (!reused || c.at > reused.at) reused = c;
+  }
+  const entry = {
+    id: reused ? reused.id : base,
+    msgs,
+    rot: reused ? reused.rot : 0,
+    lastUser,
+    at: now,
+  };
+  affinity.set(base, entry);
+  if (affinity.size > AFFINITY_MAX) {
+    const oldest = [...affinity.entries()].sort((a, b) => a[1].at - b[1].at).slice(0, affinity.size - AFFINITY_MAX);
+    for (const [k] of oldest) affinity.delete(k);
+  }
+  return entry.id;
 }
 
 // Pull the key out of whichever header the client used.
@@ -260,7 +317,19 @@ function usageMeter(session) {
       const miss = found.prompt_cache_miss_tokens;
       const input = found.prompt_tokens ?? found.input_tokens;
       const output = found.completion_tokens ?? found.output_tokens;
-      if (hit == null && input == null && output == null) return cb();
+      if (hit == null && input == null && output == null) {
+        // A response with no usage is not an error, but it silently leaves the
+        // totals behind. Say it once, loudly enough to find, then stay quiet.
+        stats.noUsage += 1;
+        if (stats.noUsage === 1) {
+          console.log(
+            "\u26a0 no usage in response - stats will be incomplete " +
+              "(the harness may need stream_options.include_usage)",
+          );
+        }
+        saveStats();
+        return cb();
+      }
 
       recordUsage(session, { hit, miss, input, output });
 
@@ -292,6 +361,7 @@ function recordUsage(session, u) {
   if (stats.window % 10 === 0) {
     const v = statsView();
     console.log(`  stats ${v.requests} req / ${v.sessions} ses: hit=${v.hit_pct}% saved=~$${v.est_saved_usd}`);
+    saveStats();
   }
 }
 
@@ -313,7 +383,49 @@ function statsView() {
     est_cost_without_cache_usd: round6(baseline / 1e6),
     est_saved_usd: round6((baseline - actual) / 1e6),
     prices_per_1m: { cache_read: PRICE_CACHE, cache_miss: PRICE_MISS, output: PRICE_OUT },
+    since: new Date(stats.since).toISOString(),
+    responses_without_usage: stats.noUsage,
   };
+}
+
+function saveStats() {
+  if (!STATS_FILE) return;
+  try {
+    fs.mkdirSync(path.dirname(STATS_FILE), { recursive: true });
+    fs.writeFileSync(
+      STATS_FILE,
+      JSON.stringify({ ...stats, sessions: [...stats.sessions] }, null, 2),
+    );
+  } catch {
+    // A read-only checkout must not take the proxy down over a counter file.
+  }
+}
+
+function loadStats() {
+  if (!STATS_FILE) return;
+  try {
+    const j = JSON.parse(fs.readFileSync(STATS_FILE, "utf8"));
+    for (const k of ["requests", "window", "hit", "miss", "input", "output", "noUsage"]) {
+      if (Number.isFinite(j[k])) stats[k] = j[k];
+    }
+    if (Array.isArray(j.sessions)) stats.sessions = new Set(j.sessions);
+    if (Number.isFinite(j.since)) stats.since = j.since;
+  } catch {
+    // No file yet, or a corrupt one: starting from zero is the safe answer.
+  }
+}
+
+function resetStats() {
+  stats.requests = 0;
+  stats.window = 0;
+  stats.sessions.clear();
+  stats.hit = 0;
+  stats.miss = 0;
+  stats.input = 0;
+  stats.output = 0;
+  stats.noUsage = 0;
+  stats.since = Date.now();
+  saveStats();
 }
 
 // GET {base}/usage -> { usage: { rolling|weekly|monthly: { status, percent, resetsAt } } }
@@ -392,6 +504,12 @@ const server = http.createServer(async (req, res) => {
     res.end(JSON.stringify(view, null, 2));
     return;
   }
+  if (req.method === "POST" && String(req.url).replace(/\?.*$/, "").replace(/\/+$/, "") === "/__stats/reset") {
+    resetStats();
+    res.writeHead(200, { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" });
+    res.end(JSON.stringify(statsView()));
+    return;
+  }
 
   const path = toUpstreamPath(req.url);
   const url = UPSTREAM + path;
@@ -416,7 +534,7 @@ const server = http.createServer(async (req, res) => {
   }
 
   const conv = analyzeConversation(body);
-  const derived = conv.id ? touchSession(conv.id, conv.debug?.msgs) : null;
+  const derived = conv.id ? touchSession(conv.id, conv) : null;
   const session =
     SESSION_MODE === "passthrough"
       ? null
@@ -520,7 +638,11 @@ async function check(key) {
   console.log(`\nkey works. start the proxy, then set the harness base URL to http://127.0.0.1:${PREFERRED_PORT}/v1`);
 }
 
-if (process.argv[2] === "--check") {
+// Only run when executed directly. Importing the file (from the tests) must
+// not bind a port or write a stats file.
+const isMain = Boolean(process.argv[1]) && import.meta.url === pathToFileURL(process.argv[1]).href;
+
+if (isMain && process.argv[2] === "--check") {
   const key = process.argv[3] ?? process.env.OPENCODE_API_KEY;
   if (!key) {
     console.error("usage: node go-session-proxy.mjs --check oc_sk_...");
@@ -530,7 +652,14 @@ if (process.argv[2] === "--check") {
   // No process.exit() here: a hard exit with undici keep-alive sockets open
   // trips a libuv assertion on Windows. Let the event loop drain instead.
   // The server below is skipped by the `else` branch.
-} else {
+} else if (isMain) {
+  loadStats();
+  for (const sig of ["SIGINT", "SIGTERM"]) {
+    process.on(sig, () => {
+      saveStats();
+      process.exit(0);
+    });
+  }
   // Bind the preferred port, or the next free one when it is taken.
   // PORT=0 hands the choice to the OS (a random free port).
   // PORT_SCAN=0 disables the search and fails loudly instead.
@@ -575,3 +704,19 @@ if (process.argv[2] === "--check") {
 
   tryListen(PREFERRED_PORT, Number.isFinite(PORT_SCAN) ? PORT_SCAN : 20);
 }
+
+// Exported for test/proxy.test.mjs, which imports this file without starting
+// the server and exercises the pure parts.
+export {
+  toUpstreamPath,
+  analyzeConversation,
+  touchSession,
+  affinity,
+  stats,
+  statsView,
+  recordUsage,
+  resetStats,
+  saveStats,
+  loadStats,
+  usageMeter,
+};
