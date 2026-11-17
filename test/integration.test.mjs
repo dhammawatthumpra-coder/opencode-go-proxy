@@ -173,6 +173,16 @@ test("streaming passes through untouched and still gets metered", async () => {
   assert.ok(afterStats.cache_read_tokens >= 900, "usage from the last chunk was parsed");
 });
 
+test("a browser page is served at /ui", async () => {
+  const r = await fetch(url("/ui"));
+  assert.equal(r.status, 200);
+  assert.match(r.headers.get("content-type"), /text\/html/);
+  const html = await r.text();
+  assert.match(html, /OpenCode Go Proxy/);
+  assert.match(html, /fetch\("\/__stats"\)/, "the page reads the live endpoints");
+  assert.match(html, /__stats\/history/, "and the history endpoint");
+});
+
 test("/__stats and /__stats/history describe the run", async () => {
   const s = await (await fetch(url("/__stats"))).json();
   assert.equal(typeof s.requests, "number");

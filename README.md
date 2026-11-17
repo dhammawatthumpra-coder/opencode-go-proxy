@@ -65,6 +65,11 @@ it (set `overlay_show_on_start` to `false` if you would rather open it yourself)
   window, Start / Stop proxy, Restart proxy
 - **Open proxy folder** / **Quit**
 
+### macOS / Linux
+
+No tray there (yet — see issue #2), but the proxy and everything it serves work
+the same. Open **`http://127.0.0.1:17387/ui`** in a browser for the same numbers
+the Windows card shows, and point your harness at the same base URL.
 ### Plain Node (any OS)
 
 ```bash

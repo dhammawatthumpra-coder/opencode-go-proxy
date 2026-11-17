@@ -589,8 +589,119 @@ function readBody(req) {
   });
 }
 
+// Browser page for the numbers: works on macOS/Linux, where there is no tray.
+// Plain HTML/JS, no external assets, reads the same endpoints the card uses.
+const UI_PAGE = `<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>OpenCode Go Proxy</title>
+<style>
+  body { background:#0a0d12; color:#e6edf3; font-family:"Segoe UI",system-ui,sans-serif; margin:0; padding:26px; }
+  h1 { font-size:16px; color:#7d8695; margin:0 0 18px; font-weight:600; }
+  .grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(170px,1fr)); gap:14px; max-width:900px; }
+  .card { background:#111820; border:1px solid #27313d; border-radius:10px; padding:16px 18px; }
+  .num { font-size:30px; font-family:Consolas,monospace; }
+  .lbl { color:#7d8695; font-size:12px; margin-top:4px; }
+  h2 { font-size:13px; color:#7d8695; margin:26px 0 10px; font-weight:600; }
+  table { width:100%; max-width:900px; border-collapse:collapse; font-family:Consolas,monospace; font-size:13px; }
+  th, td { padding:7px 12px; text-align:right; border-bottom:1px solid #1b2430; }
+  th { color:#7d8695; font-weight:600; }
+  td:first-child, th:first-child { text-align:left; color:#7d8695; }
+  .bar { height:7px; background:#1b2430; border-radius:4px; overflow:hidden; width:100%; max-width:900px; }
+  .fill { height:7px; background:#22c55e; }
+  .plabel { color:#e6edf3; font-size:12px; margin:10px 0 6px; display:flex; justify-content:space-between; max-width:900px; }
+  .plabel span:last-child { color:#7d8695; }
+  .note { color:#7d8695; font-size:12px; margin-top:20px; }
+</style>
+</head>
+<body>
+<h1>OpenCode Go Proxy — live</h1>
+<div class="grid">
+  <div class="card"><div class="num" id="hit">–</div><div class="lbl">cache hit</div></div>
+  <div class="card"><div class="num" id="requests">–</div><div class="lbl">requests</div></div>
+  <div class="card"><div class="num" id="saved">–</div><div class="lbl">tokens saved</div></div>
+  <div class="card"><div class="num" id="usd">–</div><div class="lbl">saved (est.)</div></div>
+</div>
+<h2>Plan meters — share used</h2>
+<div id="plan"></div>
+<h2>History</h2>
+<table>
+  <tr><th></th><th>today</th><th>7 days</th><th>30 days</th></tr>
+  <tr><td>requests</td><td id="r-t">–</td><td id="r-w">–</td><td id="r-m">–</td></tr>
+  <tr><td>tokens saved</td><td id="t-t">–</td><td id="t-w">–</td><td id="t-m">–</td></tr>
+  <tr><td>hit rate</td><td id="h-t">–</td><td id="h-w">–</td><td id="h-m">–</td></tr>
+  <tr><td>saved</td><td id="u-t">–</td><td id="u-w">–</td><td id="u-m">–</td></tr>
+</table>
+<div class="note" id="note">connecting…</div>
+<script>
+const $ = (id) => document.getElementById(id);
+const int_ = (n) => Number(n || 0).toLocaleString("en-US");
+const tok = (n) => { n = Number(n || 0); return n >= 1e6 ? (n / 1e6).toFixed(1) + "M" : n >= 1e3 ? Math.round(n / 1e3) + "k" : String(n); };
+const usd = (v) => { v = Number(v || 0); return "$" + (v >= 0.1 ? v.toFixed(2) : v.toFixed(4)); };
+const dash = (id) => { $(id).textContent = "–"; };
+
+function plan(w) {
+  const host = document.getElementById("plan");
+  host.textContent = "";
+  const rows = [["5-hour window", "rolling"], ["Weekly", "weekly"], ["Monthly", "monthly"]];
+  for (const [label, key] of rows) {
+    const d = (w || {})[key] || {};
+    const pct = typeof d.percent_used === "number" ? Math.max(0, Math.min(100, d.percent_used)) : null;
+    const lbl = document.createElement("div");
+    lbl.className = "plabel";
+    const name = document.createElement("span");
+    name.textContent = label;
+    const right = document.createElement("span");
+    right.textContent = pct === null ? "–" : pct + "% used";
+    lbl.appendChild(name); lbl.appendChild(right);
+    const bar = document.createElement("div");
+    bar.className = "bar";
+    const fill = document.createElement("div");
+    fill.className = "fill";
+    fill.style.width = (pct === null ? 0 : pct) + "%";
+    fill.style.background = d.status && d.status !== "ok" ? "#ef4444" : "#22c55e";
+    bar.appendChild(fill);
+    host.appendChild(lbl); host.appendChild(bar);
+  }
+}
+
+async function refresh() {
+  try {
+    const s = await (await fetch("/__stats")).json();
+    $("hit").textContent = s.hit_pct + "%";
+    $("requests").textContent = int_(s.requests);
+    $("saved").textContent = tok(s.tokens_saved);
+    $("usd").textContent = usd(s.est_saved_usd);
+    plan((s.account || {}).windows);
+    const h = await (await fetch("/__stats/history")).json();
+    const w = h.windows || {};
+    const put = (id, key, field) => { const d = w[key] || {}; $(id).textContent = field === "req" ? int_(d.requests) : field === "tok" ? tok(d.tokens_saved) : field === "pct" ? (d.hit_pct || 0) + "%" : usd(d.est_saved_usd); };
+    put("r-t", "today", "req"); put("r-w", "week", "req"); put("r-m", "month", "req");
+    put("t-t", "today", "tok"); put("t-w", "week", "tok"); put("t-m", "month", "tok");
+    put("h-t", "today", "pct"); put("h-w", "week", "pct"); put("h-m", "month", "pct");
+    put("u-t", "today", "usd"); put("u-w", "week", "usd"); put("u-m", "month", "usd");
+    const lines = [];
+    if (s.responses_without_usage) lines.push(s.responses_without_usage + " response(s) had no usage - totals may be low");
+    if ((h.days || []).length === 0) lines.push("ledger starts with the first request");
+    $("note").textContent = lines.length ? lines.join(" · ") : "counting since " + (s.since || "").slice(0, 19).replace("T", " ");
+  } catch (e) {
+    $("note").textContent = "proxy not answering";
+  }
+}
+refresh();
+setInterval(refresh, 2000);
+</script>
+</body>
+</html>`;
+
 const server = http.createServer(async (req, res) => {
-  // Local-only reporting endpoint; never forwarded upstream.
+  // Local-only reporting endpoints; never forwarded upstream.
+  if (req.method === "GET" && String(req.url).replace(/\?.*$/, "").replace(/\/+$/, "") === "/ui") {
+    res.writeHead(200, { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" });
+    res.end(UI_PAGE);
+    return;
+  }
   if (req.method === "GET" && String(req.url).replace(/\?.*$/, "").replace(/\/+$/, "") === "/__stats") {
     const view = statsView();
     view.account = accountView();
