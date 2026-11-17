@@ -53,6 +53,8 @@ A green **GO** icon appears in the system tray:
   saved to the git-ignored `config.local.json` and the proxy restarts
 - **Show stats overlay** / **Hide stats overlay** — the floating card described
   under [Measured savings](#measured-savings)
+- **Overlay opacity** → 100 / 96 / 90 / 80 / 65 %, applied live and remembered
+  in `config.local.json`
 - **Auto-start with Windows: ON/OFF**
 - **Proxy control** → **Live log...** (real-time log with session id + cache hit
   per request), run hidden / in a console window, Start / Stop proxy, Restart proxy
@@ -208,6 +210,11 @@ The tray app can put the same numbers on a small floating card
 (**Show stats overlay**): always on top, drag it anywhere, double-click or hit
 the ✕ to hide it. It only reads `/__stats`, so it never touches the API key or
 the upstream. Numbers are per proxy run and start from zero after a restart.
+
+**Overlay opacity** in the tray menu changes it live. The default is 100 % on
+purpose: at 93 %, 97 % and even 99 % the bright text of the window behind shows
+through and the numbers get hard to read. Pick a lower value if you want the
+glass look and can live with that.
 
 ![Stats overlay showing 96% cache hit, $0.5681 saved over 25 requests](docs/stats-overlay.png)
 

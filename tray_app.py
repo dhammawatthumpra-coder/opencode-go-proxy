@@ -111,6 +111,35 @@ def usage_key():
     return local or os.environ.get("OPENCODE_GO_USAGE_KEY", "").strip()
 
 
+# Opacity of the stats card. 1.0 is the default because anything below it lets
+# bright text from the window behind show through the card (measured at 0.93,
+# 0.97 and 0.99). Kept adjustable anyway - it is the user's screen.
+ALPHA_CHOICES = (1.0, 0.96, 0.9, 0.8, 0.65)
+
+
+def clamp_alpha(v):
+    try:
+        v = float(v)
+    except Exception:
+        return 1.0
+    return min(1.0, max(0.3, v))
+
+
+OVERLAY_ALPHA = clamp_alpha(load_local_config().get("overlay_alpha", 1.0))
+
+
+def set_overlay_alpha(value):
+    global OVERLAY_ALPHA
+    OVERLAY_ALPHA = clamp_alpha(value)
+    cfg = load_local_config()
+    cfg["overlay_alpha"] = OVERLAY_ALPHA
+    try:
+        with open(CONFIG_LOCAL_PATH, "w", encoding="utf-8") as f:
+            json.dump(cfg, f, indent=2)
+    except Exception:
+        pass
+
+
 def save_usage_key(key):
     cfg = load_local_config()
     if key:
@@ -453,7 +482,7 @@ def open_stats_overlay(ic=None, item=None):
         # the window behind show through the card, which made the numbers hard
         # to read. The hairline border is what keeps it looking like a floating
         # card rather than a hole in the screen.
-        root.attributes("-alpha", 1.0)
+        root.attributes("-alpha", OVERLAY_ALPHA)
         root.configure(bg=BG, highlightthickness=1, highlightbackground=TRACK)
         # Not winfo_screenwidth()-width: on a 125% display Tk reports the full
         # 1536 px while the drawable coordinate space is only ~1229, so a
@@ -547,6 +576,8 @@ def open_stats_overlay(ic=None, item=None):
                 fill.config(bg=tint)
                 fill.place_configure(relwidth=pct / 100)
 
+        applied = {"alpha": OVERLAY_ALPHA}
+
         def tick():
             if not _stats_win["open"]:
                 return
@@ -555,6 +586,11 @@ def open_stats_overlay(ic=None, item=None):
                     root.deiconify()
             elif root.winfo_viewable():
                 root.withdraw()
+
+            # Opacity picked from the tray menu, applied without a restart.
+            if applied["alpha"] != OVERLAY_ALPHA:
+                root.attributes("-alpha", OVERLAY_ALPHA)
+                applied["alpha"] = OVERLAY_ALPHA
 
             s = fetch_stats()
             if s is None:
@@ -836,6 +872,22 @@ def main():
         pystray.MenuItem("Restart proxy", on_restart),
     )
 
+    def alpha_action(value):
+        def act(ic, item):
+            set_overlay_alpha(value)
+            ic.update_menu()
+        return act
+
+    opacity_menu = pystray.Menu(*[
+        pystray.MenuItem(
+            f"{int(v * 100)}%",
+            alpha_action(v),
+            checked=(lambda item, v=v: abs(OVERLAY_ALPHA - v) < 0.005),
+            radio=True,
+        )
+        for v in ALPHA_CHOICES
+    ])
+
     main_menu = pystray.Menu(
         pystray.MenuItem(status_line, lambda i, it: None, enabled=False),
         pystray.MenuItem(url_line, lambda i, it: None, enabled=False),
@@ -843,6 +895,7 @@ def main():
         pystray.MenuItem("Copy base URL", copy_base_url),
         pystray.MenuItem(usage_key_label, open_usage_key_dialog),
         pystray.MenuItem(overlay_label, on_toggle_overlay),
+        pystray.MenuItem("Overlay opacity", opacity_menu),
         pystray.MenuItem(autostart_label, on_toggle_autostart),
         pystray.Menu.SEPARATOR,
         pystray.MenuItem("Proxy control", proxy_menu),
