@@ -137,6 +137,25 @@ def set_overlay_alpha(value):
         pass
 
 
+def watch_alpha(root):
+    """Keep a window's alpha in step with the one shared setting.
+
+    Every window follows OVERLAY_ALPHA, so moving the slider updates the card,
+    the settings window and the history window at once."""
+    state = {"v": None}
+
+    def tick():
+        try:
+            if state["v"] != OVERLAY_ALPHA:
+                root.attributes("-alpha", OVERLAY_ALPHA)
+                state["v"] = OVERLAY_ALPHA
+            root.after(400, tick)
+        except Exception:
+            pass  # window closed
+
+    tick()
+
+
 def monitor_rects():
     """(x, y, w, h) for every attached monitor, or [] when unknown.
 
@@ -671,7 +690,7 @@ def open_stats_overlay(ic=None, item=None):
                 fill.config(bg=tint)
                 fill.place_configure(relwidth=pct / 100)
 
-        applied = {"alpha": OVERLAY_ALPHA}
+        watch_alpha(root)
 
         def tick():
             if not _stats_win["open"]:
@@ -681,11 +700,6 @@ def open_stats_overlay(ic=None, item=None):
                     root.deiconify()
             elif root.winfo_viewable():
                 root.withdraw()
-
-            # Opacity picked from the tray menu, applied without a restart.
-            if applied["alpha"] != OVERLAY_ALPHA:
-                root.attributes("-alpha", OVERLAY_ALPHA)
-                applied["alpha"] = OVERLAY_ALPHA
 
             s = fetch_stats()
             if s is None:
@@ -756,8 +770,10 @@ def open_settings_dialog(ic=None, item=None):
         root.title("Overlay settings")
         root.configure(bg=BG)
         root.attributes("-topmost", True)
+        root.attributes("-alpha", OVERLAY_ALPHA)
         root.geometry("560x432" + (saved_pos("settings_pos") or f"+{int(root.winfo_screenwidth() * 0.40)}+110"))
         root.resizable(False, False)
+        watch_alpha(root)
 
         # Same memory as the card: the window opens where it was last closed.
         # Debounced because <Configure> fires for every pixel of a drag.
@@ -802,7 +818,7 @@ def open_settings_dialog(ic=None, item=None):
              f"environment and .env are the fallback. Empty it to remove the key.",
              8, DIM, False, (6, 16))
 
-        text("Card opacity", 11, FG, True, (0, 6))
+        text("Window opacity", 11, FG, True, (0, 6))
         # A slider, not radios: on a dark background the native radio indicator
         # is too low-contrast to tell which value is selected.
         row = tk.Frame(root, bg=BG)
@@ -838,7 +854,8 @@ def open_settings_dialog(ic=None, item=None):
         canvas.bind("<B1-Motion>", drag)
         draw()
         text("100% keeps the numbers readable. Lower values let the window behind "
-             "show through the card.", 8, DIM, False, (6, 0))
+             "show through - the card, this window and the history window all "
+             "share it.", 8, DIM, False, (6, 0))
 
         # The tray menu stays, but these are the same actions for when the card
         # is what you are looking at.
@@ -988,11 +1005,13 @@ def open_history_window(ic=None, item=None):
         root.title("Usage history")
         root.configure(bg=BG)
         root.attributes("-topmost", True)
+        root.attributes("-alpha", OVERLAY_ALPHA)
         root.geometry(
             f"{W}x336"
             + (saved_pos("history_pos") or f"+{int(root.winfo_screenwidth() * 0.40)}+150")
         )
         root.resizable(False, False)
+        watch_alpha(root)
 
         pending = {"id": None}
 
@@ -1065,10 +1084,25 @@ def open_history_window(ic=None, item=None):
                 cells[(4, c)].config(text=money(d.get("est_saved_usd", 0)))
             days = h.get("days") or []
             draw_bars(days)
-            status.config(text=f"{len(days)} day(s) recorded - reset never clears these",
-                          fg=DIM)
+            if days:
+                status.config(text=f"{len(days)} day(s) recorded - reset never clears these",
+                              fg=DIM)
+            else:
+                # The card's totals come from the persisted counters; this
+                # ledger only knows what the proxy recorded after it existed.
+                status.config(text="nothing recorded yet - the next request starts today",
+                              fg=DIM)
+
+        alive = {"v": True}
+
+        def poll():
+            if not alive["v"]:
+                return
+            refresh()
+            root.after(5000, poll)  # the numbers move while the proxy is busy
 
         def close(_e=None):
+            alive["v"] = False
             _history_win["open"] = False
             root.destroy()
 
@@ -1080,7 +1114,7 @@ def open_history_window(ic=None, item=None):
 
         root.protocol("WM_DELETE_WINDOW", close)
         root.bind("<Escape>", close)
-        refresh()
+        poll()
         root.mainloop()
 
     threading.Thread(target=_run, daemon=True).start()

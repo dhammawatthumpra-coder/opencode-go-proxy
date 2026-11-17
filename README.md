@@ -229,9 +229,11 @@ or the upstream. Numbers are per proxy run and start from zero after a restart.
 ![Overlay settings window: usage API key field, card opacity slider, and proxy
 controls](docs/settings.png)
 
-Opacity is 100 % by default, on purpose: at 93 %, 97 % and even 99 % the bright
-text of the window behind shows through and the numbers get hard to read. Pick a
-lower value in Settings if you want the glass look and can live with that.
+Opacity is one setting for **every window** — the card, the settings window and
+the history window follow it live. The default is 100 %, on purpose: at 93 %,
+97 % and even 99 % the bright text of the window behind shows through and the
+numbers get hard to read. Pick a lower value in Settings if you want the glass
+look and can live with that.
 
 ![Stats overlay: 96% cache hit, $8.41 saved over 154 requests, the 5-hour,
 weekly and monthly plan meters, and the note about responses without usage
