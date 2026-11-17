@@ -184,15 +184,32 @@ def pos_is_visible(x, y, rects=None):
     return False
 
 
-def save_overlay_pos(x, y):
-    """Remember where the card was dropped, so it opens there next time."""
+def save_pos(name, x, y):
+    """Remember a window position in config.local.json, so it reopens there."""
     try:
         cfg = load_local_config()
-        cfg["overlay_pos"] = [int(x), int(y)]
+        cfg[name] = [int(x), int(y)]
         with open(CONFIG_LOCAL_PATH, "w", encoding="utf-8") as f:
             json.dump(cfg, f, indent=2)
     except Exception:
         pass
+
+
+def saved_pos(name):
+    """' WxH+x+y' suffix for the saved position, or '' when there is none.
+
+    Positions are checked against the monitor list: a spot on a screen that
+    has since been unplugged is dropped rather than opening off-desktop.
+    """
+    saved = load_local_config().get(name)
+    if (
+        isinstance(saved, list)
+        and len(saved) == 2
+        and all(isinstance(v, (int, float)) for v in saved)
+        and pos_is_visible(int(saved[0]), int(saved[1]))
+    ):
+        return f"+{int(saved[0])}+{int(saved[1])}"
+    return ""
 
 
 def save_usage_key(key):
@@ -556,16 +573,7 @@ def open_stats_overlay(ic=None, item=None):
         # so a right-edge placement lands off screen. 0.58 keeps a 300 px card
         # inside that 1229.
         sw = root.winfo_screenwidth()
-        saved = load_local_config().get("overlay_pos")
-        if (
-            isinstance(saved, list)
-            and len(saved) == 2
-            and all(isinstance(v, (int, float)) for v in saved)
-            and pos_is_visible(int(saved[0]), int(saved[1]))
-        ):
-            at = f"+{int(saved[0])}+{int(saved[1])}"
-        else:
-            at = f"+{int(sw * 0.58)}+48"
+        at = saved_pos("overlay_pos") or f"+{int(sw * 0.58)}+48"
         root.geometry(f"300x302{at}")
 
         def drag_start(e):
@@ -576,7 +584,7 @@ def open_stats_overlay(ic=None, item=None):
             root.geometry(f"+{e.x_root - dx}+{e.y_root - dy}")
 
         def drag_end(_e=None):
-            save_overlay_pos(root.winfo_x(), root.winfo_y())
+            save_pos("overlay_pos", root.winfo_x(), root.winfo_y())
 
         def hide(_e=None):
             _stats_win["want"] = False
@@ -746,8 +754,21 @@ def open_settings_dialog(ic=None, item=None):
         root.title("Overlay settings")
         root.configure(bg=BG)
         root.attributes("-topmost", True)
-        root.geometry("560x432")
+        root.geometry("560x432" + (saved_pos("settings_pos") or f"+{int(root.winfo_screenwidth() * 0.40)}+110"))
         root.resizable(False, False)
+
+        # Same memory as the card: the window opens where it was last closed.
+        # Debounced because <Configure> fires for every pixel of a drag.
+        pending = {"id": None}
+
+        def remember(_e=None):
+            if pending["id"]:
+                root.after_cancel(pending["id"])
+            pending["id"] = root.after(
+                500, lambda: save_pos("settings_pos", root.winfo_x(), root.winfo_y())
+            )
+
+        root.bind("<Configure>", remember)
 
         def text(s, size=9, color=DIM, bold=False, pady=(0, 0)):
             tk.Label(root, text=s, bg=BG, fg=color, justify="left", wraplength=524,

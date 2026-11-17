@@ -55,7 +55,7 @@ it (set `overlay_show_on_start` to `false` if you would rather open it yourself)
 - **Settings...** — the same window as the ⚙ on the card: usage key, card
   opacity, and the proxy actions (copy URL, live log, restart, start/stop,
   auto-start). Everything here also exists in this menu, for when the card is
-  hidden.
+  hidden. The window remembers its own position too.
 - **Auto-start with Windows: ON/OFF**
 - **Proxy control** → **Live log...** (real-time log with session id + cache hit
   per request), run hidden / in a console window, Start / Stop proxy, Restart proxy
