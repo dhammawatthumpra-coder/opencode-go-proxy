@@ -114,9 +114,6 @@ def usage_key():
 # Opacity of the stats card. 1.0 is the default because anything below it lets
 # bright text from the window behind show through the card (measured at 0.93,
 # 0.97 and 0.99). Kept adjustable anyway - it is the user's screen.
-ALPHA_CHOICES = (1.0, 0.96, 0.9, 0.8, 0.65)
-
-
 def clamp_alpha(v):
     try:
         v = float(v)
@@ -511,6 +508,10 @@ def open_stats_overlay(ic=None, item=None):
         close = tk.Label(head, text="\u2715", bg=BG, fg=DIM, font=("Segoe UI", 9), cursor="hand2")
         close.pack(side="right")
         close.bind("<Button-1>", hide)
+        gear = tk.Label(head, text="\u2699", bg=BG, fg=DIM,
+                        font=("Segoe UI", 10), cursor="hand2")
+        gear.pack(side="right", padx=(0, 10))
+        gear.bind("<Button-1>", lambda e: open_settings_dialog())
 
         big = tk.Label(root, text="\u2014", bg=BG, fg=FG, font=("Segoe UI", 26, "bold"))
         big.pack(pady=(2, 0))
@@ -643,48 +644,87 @@ def on_toggle_overlay(ic, item):
     ic.update_menu()
 
 
-def usage_key_label(item=None):
-    return "Usage key setting: set" if usage_key() else "Usage key setting: not set"
-
-
-def open_usage_key_dialog(ic=None, item=None):
-    """Paste the read-only usage key. Saved to config.local.json (git-ignored),
-    then the proxy is restarted so the child process picks it up."""
+def open_settings_dialog(ic=None, item=None):
+    """The only settings surface: the read-only usage key and the card's
+    opacity. Reachable from the gear on the card and from the tray menu, so it
+    still works with the card hidden. Writes config.local.json (git-ignored)
+    and restarts the proxy so the child process picks up a new key."""
     def _run():
         import tkinter as tk
 
         BG, DIM, FG, FIELD = "#0e1116", "#7d8695", "#e6edf3", "#161b22"
+        GOOD = "#22c55e"
         root = tk.Tk()
-        root.title("Usage API key")
+        root.title("Overlay settings")
         root.configure(bg=BG)
         root.attributes("-topmost", True)
-        root.geometry("520x300")
+        root.geometry("540x392")
         root.resizable(False, False)
 
         def text(s, size=9, color=DIM, bold=False, pady=(0, 0)):
-            tk.Label(root, text=s, bg=BG, fg=color, justify="left", wraplength=484,
+            tk.Label(root, text=s, bg=BG, fg=color, justify="left", wraplength=504,
                      anchor="w", font=("Segoe UI", size, "bold" if bold else "normal")
                      ).pack(fill="x", padx=18, pady=pady)
 
-        text("Show the plan's own quota on the card", 11, FG, True, (16, 4))
-        text("Create the key at opencode.ai/console -> Account -> Personal API keys.\n"
+        text("Usage API key", 11, FG, True, (16, 2))
+        text("Create it at opencode.ai/console -> Account -> Personal API keys.\n"
              "Permissions: Custom, then Usage: Read. Leave Models on None, so the key\n"
              "cannot call a model - it only has to read the three windows.",
-             9, DIM, False, (0, 12))
+             8, DIM, False, (0, 8))
 
-        # Masked: the read-only key is still an account credential, and this
-        # window is the kind of thing that ends up in a screen recording.
+        # Masked: the read-only key is still a credential, and this window is
+        # the kind of thing that ends up in a screen recording.
         entry = tk.Entry(root, font=("Consolas", 10), bg=FIELD, fg=FG, show="\u2022",
                          insertbackground=FG, relief="flat", highlightthickness=1,
                          highlightbackground="#2a313c", highlightcolor="#3b82f6")
         entry.pack(fill="x", padx=18, ipady=6)
         entry.insert(0, usage_key())
 
-        text(f"stored in {os.path.basename(CONFIG_LOCAL_PATH)} (git-ignored); "
-             f"the environment and .env are the fallback", 8, DIM, False, (8, 0))
+        text(f"stored in {os.path.basename(CONFIG_LOCAL_PATH)} (git-ignored); the "
+             f"environment and .env are the fallback. Empty it to remove the key.",
+             8, DIM, False, (6, 16))
 
-        def apply(key):
-            save_usage_key(key)
+        text("Card opacity", 11, FG, True, (0, 6))
+        # A slider, not radios: on a dark background the native radio indicator
+        # is too low-contrast to tell which value is selected.
+        row = tk.Frame(root, bg=BG)
+        row.pack(fill="x", padx=18)
+        alpha = tk.IntVar(value=int(round(OVERLAY_ALPHA * 100)))
+        readout = tk.Label(row, text=f"{alpha.get()}%", bg=BG, fg=FG, width=5,
+                           anchor="e", font=("Consolas", 9))
+        readout.pack(side="right")
+        # Hand-drawn slider: tk.Scale's knob is barely visible on a dark theme,
+        # and this matches the bars the card already draws.
+        SLIDER_W = 370
+
+        def draw():
+            pct = alpha.get()
+            x = SLIDER_W * pct / 100
+            canvas.delete("all")
+            canvas.create_rectangle(0, 5, SLIDER_W, 11, fill=FIELD, outline="")
+            canvas.create_rectangle(0, 5, x, 11, fill=GOOD, outline="")
+            canvas.create_oval(x - 5, 2, x + 5, 14, fill=FG, outline=BG)
+
+        def drag(e):
+            pct = max(30, min(100, round(e.x / SLIDER_W * 100)))
+            if pct != alpha.get():
+                alpha.set(pct)
+                readout.config(text=f"{pct}%")
+                draw()
+                set_overlay_alpha(pct / 100)  # live preview on the card
+
+        canvas = tk.Canvas(row, width=SLIDER_W, height=16, bg=BG, bd=0,
+                           highlightthickness=0, cursor="hand2")
+        canvas.pack(side="left", padx=(0, 10))
+        canvas.bind("<Button-1>", drag)
+        canvas.bind("<B1-Motion>", drag)
+        draw()
+        text("100% keeps the numbers readable. Lower values let the window behind "
+             "show through the card.", 8, DIM, False, (6, 0))
+
+        def apply():
+            save_usage_key(entry.get().strip())
+            set_overlay_alpha(alpha.get() / 100)
             root.destroy()
             ctl.stop()
             if ctl.enabled and ctl.wanted:
@@ -697,9 +737,7 @@ def open_usage_key_dialog(ic=None, item=None):
 
         bar = tk.Frame(root, bg=BG)
         bar.pack(fill="x", padx=18, pady=16, side="bottom")
-        for label, cmd in (("Cancel", root.destroy),
-                           ("Remove", lambda: apply("")),
-                           ("Save & restart proxy", lambda: apply(entry.get().strip()))):
+        for label, cmd in (("Cancel", root.destroy), ("Save & restart proxy", apply)):
             tk.Button(bar, text=label, command=cmd, font=("Segoe UI", 9),
                       bg=FIELD, fg=FG, activebackground="#2a313c", activeforeground=FG,
                       relief="flat", bd=0, padx=12, pady=5, cursor="hand2"
@@ -707,7 +745,6 @@ def open_usage_key_dialog(ic=None, item=None):
 
         entry.focus_set()
         entry.select_range(0, "end")
-        root.bind("<Return>", lambda e: apply(entry.get().strip()))
         root.bind("<Escape>", lambda e: root.destroy())
         root.mainloop()
 
@@ -872,30 +909,13 @@ def main():
         pystray.MenuItem("Restart proxy", on_restart),
     )
 
-    def alpha_action(value):
-        def act(ic, item):
-            set_overlay_alpha(value)
-            ic.update_menu()
-        return act
-
-    opacity_menu = pystray.Menu(*[
-        pystray.MenuItem(
-            f"{int(v * 100)}%",
-            alpha_action(v),
-            checked=(lambda item, v=v: abs(OVERLAY_ALPHA - v) < 0.005),
-            radio=True,
-        )
-        for v in ALPHA_CHOICES
-    ])
-
     main_menu = pystray.Menu(
         pystray.MenuItem(status_line, lambda i, it: None, enabled=False),
         pystray.MenuItem(url_line, lambda i, it: None, enabled=False),
         pystray.Menu.SEPARATOR,
         pystray.MenuItem("Copy base URL", copy_base_url),
-        pystray.MenuItem(usage_key_label, open_usage_key_dialog),
         pystray.MenuItem(overlay_label, on_toggle_overlay),
-        pystray.MenuItem("Overlay opacity", opacity_menu),
+        pystray.MenuItem("Settings...", open_settings_dialog),
         pystray.MenuItem(autostart_label, on_toggle_autostart),
         pystray.Menu.SEPARATOR,
         pystray.MenuItem("Proxy control", proxy_menu),

@@ -49,12 +49,10 @@ A green **GO** icon appears in the system tray:
 - `● Go proxy: RUNNING (tray) :17387` — status (non-clickable)
 - `http://127.0.0.1:17387/v1` — the base URL to paste into your harness (non-clickable)
 - **Copy base URL** — clipboard
-- **Usage key setting: set / not set** — paste the read-only usage key; it is
-  saved to the git-ignored `config.local.json` and the proxy restarts
 - **Show stats overlay** / **Hide stats overlay** — the floating card described
   under [Measured savings](#measured-savings)
-- **Overlay opacity** → 100 / 96 / 90 / 80 / 65 %, applied live and remembered
-  in `config.local.json`
+- **Settings...** — the same window as the ⚙ on the card: usage key and card
+  opacity, saved to the git-ignored `config.local.json`
 - **Auto-start with Windows: ON/OFF**
 - **Proxy control** → **Live log...** (real-time log with session id + cache hit
   per request), run hidden / in a console window, Start / Stop proxy, Restart proxy
@@ -208,13 +206,13 @@ proxy prints a summary line every 10 turns.
 
 The tray app can put the same numbers on a small floating card
 (**Show stats overlay**): always on top, drag it anywhere, double-click or hit
-the ✕ to hide it. It only reads `/__stats`, so it never touches the API key or
-the upstream. Numbers are per proxy run and start from zero after a restart.
+the ✕ to hide it, and the **⚙** opens Settings — usage key and opacity — without
+going back to the tray. It only reads `/__stats`, so it never touches the API key
+or the upstream. Numbers are per proxy run and start from zero after a restart.
 
-**Overlay opacity** in the tray menu changes it live. The default is 100 % on
-purpose: at 93 %, 97 % and even 99 % the bright text of the window behind shows
-through and the numbers get hard to read. Pick a lower value if you want the
-glass look and can live with that.
+Opacity is 100 % by default, on purpose: at 93 %, 97 % and even 99 % the bright
+text of the window behind shows through and the numbers get hard to read. Pick a
+lower value in Settings if you want the glass look and can live with that.
 
 ![Stats overlay showing 96% cache hit, $0.5681 saved over 25 requests](docs/stats-overlay.png)
 
@@ -256,9 +254,9 @@ the number the provider bills against:
 ▓▓▓░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░
 ```
 
-Easiest is the tray menu: **Usage key** opens a small window, tells you what to
-create, and stores the key in `config.local.json` — inside the repo but
-git-ignored — then restarts the proxy with it.
+Easiest is the **⚙** on the card (or **Settings...** in the tray menu): one
+window tells you what to create, stores the key in `config.local.json` — inside
+the repo but git-ignored — and restarts the proxy with it.
 
 For a headless run, set the variable yourself. The tray also loads a `.env`
 beside the proxy or one directory up, so `D:\tunnel\.env` works for a checkout in
