@@ -233,8 +233,9 @@ Opacity is 100 % by default, on purpose: at 93 %, 97 % and even 99 % the bright
 text of the window behind shows through and the numbers get hard to read. Pick a
 lower value in Settings if you want the glass look and can live with that.
 
-![Stats overlay: 100% cache hit, $0.2168 saved over 5 requests, and the 5-hour,
-weekly and monthly plan meters](docs/stats-overlay.png)
+![Stats overlay: 96% cache hit, $8.41 saved over 154 requests, the 5-hour,
+weekly and monthly plan meters, and the note about responses without usage
+data](docs/stats-overlay.png)
 
 ```
   stats 10 req / 2 ses: hit=90% saved=~$0.001323
@@ -286,6 +287,9 @@ totals and the last 14 days as bars:
   hit rate            96%        95%       93%
   saved              $0.22      $1.64     $7.11
 ```
+
+![Usage history window: requests, tokens saved, hit rate and money saved for
+today, 7 days and 30 days, with the last 14 days as bars](docs/history.png)
 
 Days are local-time and kept for 400 days. The ledger starts on the day this
 version first runs — usage from before it was installed was never recorded.

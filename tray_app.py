@@ -574,7 +574,9 @@ def open_stats_overlay(ic=None, item=None):
         # inside that 1229.
         sw = root.winfo_screenwidth()
         at = saved_pos("overlay_pos") or f"+{int(sw * 0.58)}+48"
-        root.geometry(f"300x302{at}")
+        # 318, not 302: the hint line under the plan rows ("no usage key",
+        # "N responses had no usage") needs the room or it gets clipped.
+        root.geometry(f"300x318{at}")
 
         def drag_start(e):
             root._drag = (e.x_root - root.winfo_x(), e.y_root - root.winfo_y())

@@ -84,6 +84,7 @@ const stats = {
   daily: {},
 };
 const DAILY_MAX_DAYS = 400;
+let lastSave = 0;
 
 const round6 = (n) => Number(n.toFixed(6));
 
@@ -382,8 +383,11 @@ function recordUsage(session, u, now = Date.now()) {
   if (stats.window % 10 === 0) {
     const v = statsView();
     console.log(`  stats ${v.requests} req / ${v.sessions} ses: hit=${v.hit_pct}% saved=~$${v.est_saved_usd}`);
-    saveStats();
   }
+  // The tray stops the child with TerminateProcess on Windows, so there is no
+  // signal to save on. Writing every 30 s bounds the loss to one interval and
+  // means a short session still lands in the per-day ledger.
+  if (Date.now() - lastSave >= 30_000) saveStats();
 }
 
 function statsView() {
@@ -467,6 +471,7 @@ function pruneDaily() {
 
 function saveStats() {
   if (!STATS_FILE) return;
+  lastSave = Date.now();
   pruneDaily();
   try {
     fs.mkdirSync(path.dirname(STATS_FILE), { recursive: true });
