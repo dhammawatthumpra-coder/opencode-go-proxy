@@ -210,11 +210,15 @@ the ✕ to hide it, and the **⚙** opens Settings — usage key and opacity —
 going back to the tray. It only reads `/__stats`, so it never touches the API key
 or the upstream. Numbers are per proxy run and start from zero after a restart.
 
+![Overlay settings window: usage API key field and the card opacity
+slider](docs/settings.png)
+
 Opacity is 100 % by default, on purpose: at 93 %, 97 % and even 99 % the bright
 text of the window behind shows through and the numbers get hard to read. Pick a
 lower value in Settings if you want the glass look and can live with that.
 
-![Stats overlay showing 96% cache hit, $0.5681 saved over 25 requests](docs/stats-overlay.png)
+![Stats overlay: 100% cache hit, $0.2168 saved over 5 requests, and the 5-hour,
+weekly and monthly plan meters](docs/stats-overlay.png)
 
 ```
   stats 10 req / 2 ses: hit=90% saved=~$0.001323

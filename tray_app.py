@@ -658,7 +658,7 @@ def open_settings_dialog(ic=None, item=None):
         root.title("Overlay settings")
         root.configure(bg=BG)
         root.attributes("-topmost", True)
-        root.geometry("540x392")
+        root.geometry("540x348")
         root.resizable(False, False)
 
         def text(s, size=9, color=DIM, bold=False, pady=(0, 0)):
