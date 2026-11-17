@@ -158,6 +158,14 @@ def dark_title_bar(root):
                     hwnd, attr, ctypes.byref(on), ctypes.sizeof(on)
                 ) == 0:
                     break
+            # Paint the caption the same near-black as the window body instead
+            # of the system's dark grey. DWM wants a COLORREF (0x00BBGGRR).
+            for attr, rgb in ((35, 0x0E1116), (36, 0xE6EDF3)):
+                ref = ((rgb & 0xFF) << 16) | (rgb & 0x00FF00) | ((rgb >> 16) & 0xFF)
+                v = ctypes.c_int(ref)
+                ctypes.windll.dwmapi.DwmSetWindowAttribute(
+                    hwnd, attr, ctypes.byref(v), ctypes.sizeof(v)
+                )
         except Exception:
             pass
 
