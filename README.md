@@ -54,12 +54,12 @@ it (set `overlay_show_on_start` to `false` if you would rather open it yourself)
   under [Measured savings](#measured-savings)
 - **Usage history...** — today / 7 / 30 days from the per-day ledger
 - **Settings...** — the same window as the ⚙ on the card: usage key, card
-  opacity, and the proxy actions (copy URL, live log, history, restart,
+  opacity, and the proxy actions (copy URL, flow, history, restart,
   start/stop, auto-start). Everything here also exists in this menu, for when
   the card is hidden. The window remembers its own position too.
 - **Auto-start with Windows: ON/OFF**
-- **Proxy control** → **Live log...** (real-time log with session id + cache hit
-  per request), run hidden / in a console window, Start / Stop proxy, Restart proxy
+- **Proxy control** → **Flow...** (see [Flow](#flow)), run hidden / in a console
+  window, Start / Stop proxy, Restart proxy
 - **Open proxy folder** / **Quit**
 
 ### Plain Node (any OS)
@@ -351,6 +351,20 @@ Neither suite touches the network, starts the proxy, or needs a display.
 node --test test/proxy.test.mjs        # path folding, session ids, compaction, cost maths
 python -m unittest discover -s test    # tray helpers; skipped if pystray is missing
 ```
+
+## Flow
+
+**Flow** (Proxy control, or the button in Settings) draws the request path —
+harness → proxy → gateway — with light running along the wires, the session id
+and prompt cache called out underneath, and the live log still scrolling at the
+bottom: green for usage lines, blue for the 10-turn summary, red for anything
+that went wrong.
+
+![Flow window: harness, proxy and gateway boxes joined by glowing wires, with
+the live log underneath](docs/flow.png)
+
+It replaced a plain tail window, which looked empty whenever the proxy was idle
+— nothing is written to the log between requests.
 
 ## Troubleshooting
 

@@ -494,79 +494,252 @@ def ui_post(build):
 
 # ------------------------------------------------------------ windows & actions ---
 
-_log_win_open = False
+_live_win = {"open": False}
 
 
 def open_log_window(ic=None, item=None):
-    """Open a live-tailing log window (single instance)."""
-    global _log_win_open
-    if _log_win_open:
-        return
-    _log_win_open = True
+    """Flow: what talks to what, with light running along the wires.
 
-    def _run():
-        global _log_win_open
-        try:
-            import tkinter as tk
-            from tkinter.scrolledtext import ScrolledText
-        except ImportError:
-            _log_win_open = False
-            return
+    It replaced a plain tail window, which looked empty until a request
+    happened to arrive - nothing is written to the log while the proxy sits
+    idle. The tail of the log stays underneath for when something looks off.
+    """
+    if _live_win["open"]:
+        return
+    _live_win["open"] = True
+
+    def build():
+        import random
+        import tkinter as tk
+
+        BG, DIM, FG, GOOD, BAD = "#0a0d12", "#7d8695", "#e6edf3", "#22c55e", "#ef4444"
+        NODE, EDGE = "#111820", "#27313d"
+        W, H = 780, 420
 
         root = tk.Toplevel(_UI["root"])
-        root.title("OpenCode Go Proxy - Live Log")
-        root.geometry("950x620")
+        root.title("Flow")
+        root.configure(bg=BG)
+        root.attributes("-topmost", True)
+        root.attributes("-alpha", OVERLAY_ALPHA)
+        root.geometry(
+            f"{W + 32}x640"
+            + (saved_pos("flow_pos") or f"+{int(root.winfo_screenwidth() * 0.22)}+30")
+        )
+        root.resizable(False, False)
+        watch_alpha(root)
         dark_title_bar(root)
 
-        txt = ScrolledText(root, state="disabled",
-                           font=("Consolas", 9), bg="#1e1e1e", fg="#d4d4d4")
-        txt.pack(fill="both", expand=True)
+        c = tk.Canvas(root, width=W, height=H, bg=BG, bd=0, highlightthickness=0)
+        c.pack(padx=16, pady=(12, 6))
 
-        closed = {"v": False}
+        # faint stars, so the dark background has some depth
+        rnd = random.Random(7)
+        for _ in range(110):
+            x, y = rnd.randrange(W), rnd.randrange(H)
+            c.create_oval(x, y, x + 2, y + 2, outline="",
+                          fill=rnd.choice(("#151d26", "#1a2430", "#101720")))
 
-        def on_close():
-            closed["v"] = True
-            global _log_win_open
-            _log_win_open = False
-            root.destroy()
+        def box(x, y, w, h, title):
+            c.create_rectangle(x, y, x + w, y + h, fill=NODE, outline=EDGE)
+            c.create_line(x + 1, y + 1, x + w - 1, y + 1, fill="#1d2733")
+            c.create_text(x + 14, y + 20, text=title, fill=DIM, anchor="w",
+                          font=("Segoe UI", 8, "bold"))
+            return (c.create_text(x + 14, y + 44, text="", fill=FG, anchor="w",
+                                  font=("Consolas", 10)),
+                    c.create_text(x + 14, y + 66, text="", fill=DIM, anchor="w",
+                                  font=("Segoe UI", 8)))
 
-        root.protocol("WM_DELETE_WINDOW", on_close)
+        MAIN = [(198, 152), (298, 152)]
+        MAIN2 = [(472, 152), (572, 152)]
+        BR_A = [(388, 212), (388, 250), (318, 250), (318, 288)]
+        BR_B = [(388, 212), (388, 250), (454, 250), (454, 288)]
 
-        txt.config(state="normal")
-        txt.insert("end", f"# {base_url()}  ->  {UPSTREAM}\n"
-                          f"# log: {LOG_PATH}\n\n")
-        txt.config(state="disabled")
+        def wire(pts, outer, inner):
+            xy = [v for p in pts for v in p]
+            c.create_line(*xy, fill=outer, width=9, capstyle="round", joinstyle="round")
+            c.create_line(*xy, fill=inner, width=3, capstyle="round", joinstyle="round")
 
-        pos = os.path.getsize(LOG_PATH) if os.path.exists(LOG_PATH) else 0
+        for pts in (MAIN, MAIN2):
+            wire(pts, "#0b1f15", "#17402a")
+        for pts in (BR_A, BR_B):
+            wire(pts, "#0c1622", "#1a3a52")
 
-        def poll():
-            nonlocal pos
-            if closed["v"]:
+        harness = box(30, 112, 168, 84, "HARNESS")
+        proxy = box(298, 98, 174, 114, "PROXY")
+        upstream = box(572, 112, 178, 84, "OPENCODE")
+        sid = box(238, 288, 160, 76, "SESSION ID")
+        cache = box(406, 288, 160, 76, "PROMPT CACHE")
+
+        c.create_text(248, 138, text="HTTP", fill=DIM, font=("Segoe UI", 7))
+        c.create_text(522, 138, text="HTTPS", fill=DIM, font=("Segoe UI", 7))
+
+        def point_at(pts, t):
+            segs, total = [], 0.0
+            for i in range(len(pts) - 1):
+                (x0, y0), (x1, y1) = pts[i], pts[i + 1]
+                d = ((x1 - x0) ** 2 + (y1 - y0) ** 2) ** 0.5
+                segs.append((d, x0, y0, x1, y1))
+                total += d
+            left = (t % 1.0) * total
+            for d, x0, y0, x1, y1 in segs:
+                if left <= d:
+                    f = left / d if d else 0
+                    return x0 + (x1 - x0) * f, y0 + (y1 - y0) * f
+                left -= d
+            return pts[-1]
+
+        PULSES = []
+
+        def add_pulses(pts, count, speed, head, tail):
+            for k in range(count):
+                PULSES.append({
+                    "pts": pts, "t": k / count, "v": speed,
+                    "head": c.create_oval(0, 0, 0, 0, fill=head, outline=""),
+                    "tail": c.create_oval(0, 0, 0, 0, fill=tail, outline=""),
+                })
+
+        add_pulses(MAIN, 3, 0.011, "#8bffc4", "#1f7a4d")
+        add_pulses(MAIN2, 3, 0.010, "#8bffc4", "#1f7a4d")
+        add_pulses(BR_A, 2, 0.008, "#7fd4ff", "#1d5875")
+        add_pulses(BR_B, 2, 0.008, "#7fd4ff", "#1d5875")
+
+        # The log keeps running underneath, one line at a time, colour-coded:
+        # it is the part that tells you what actually moved.
+        tail = tk.Text(root, height=11, bg="#080b0f", fg="#8b949e", bd=0,
+                       font=("Consolas", 8), wrap="none", state="disabled",
+                       highlightthickness=0)
+        tail.pack(fill="both", expand=True, padx=16, pady=(0, 14))
+        tail.tag_config("req", foreground="#7d8695")
+        tail.tag_config("usage", foreground="#22c55e")
+        tail.tag_config("stats", foreground="#7fd4ff")
+        tail.tag_config("warn", foreground="#ef4444")
+
+        def tag_for(line):
+            if line.startswith("usage"):
+                return "usage"
+            if line.startswith("  stats"):
+                return "stats"
+            if "\u26a0" in line or "unavailable" in line:
+                return "warn"
+            return "req"
+
+        def append(lines, replace=False):
+            if not lines:
+                return
+            tail.config(state="normal")
+            if replace:
+                tail.delete("1.0", "end")
+            for ln in lines:
+                tail.insert("end", ln + "\n", tag_for(ln))
+            if int(tail.index("end-1c").split(".")[0]) > 400:
+                tail.delete("1.0", "200.0")
+            tail.see("end")
+            tail.config(state="disabled")
+
+        pos = {"v": os.path.getsize(LOG_PATH) if os.path.exists(LOG_PATH) else 0}
+        try:
+            if os.path.exists(LOG_PATH):
+                with open(LOG_PATH, "rb") as f:
+                    f.seek(max(0, pos["v"] - 8192))
+                    seed = f.read().decode("utf-8", "replace").splitlines()
+                append([ln for ln in seed if ln.strip()][-12:], replace=True)
+        except Exception:
+            pass
+
+        def poll_log():
+            if not root.winfo_exists():
                 return
             try:
-                size = os.path.getsize(LOG_PATH) if os.path.exists(LOG_PATH) else 0
-                if size < pos:
-                    pos = 0
-                if size > pos:
-                    with open(LOG_PATH, encoding="utf-8", errors="replace") as f:
-                        f.seek(pos)
-                        data = f.read()
-                    pos = size
-                    if data:
-                        txt.config(state="normal")
-                        txt.insert("end", data)
-                        nlines = int(txt.index("end-1c").split(".")[0])
-                        if nlines > 3000:
-                            txt.delete("1.0", "%d.0" % (nlines - 3000))
-                        txt.see("end")
-                        txt.config(state="disabled")
+                if os.path.exists(LOG_PATH):
+                    size = os.path.getsize(LOG_PATH)
+                    if size < pos["v"]:
+                        pos["v"] = 0
+                    if size > pos["v"]:
+                        with open(LOG_PATH, "rb") as f:
+                            f.seek(pos["v"])
+                            data = f.read().decode("utf-8", "replace")
+                        pos["v"] = size
+                        append([ln for ln in data.splitlines() if ln.strip()])
             except Exception:
                 pass
-            root.after(500, poll)
+            root.after(400, poll_log)
 
-        root.after(500, poll)
+        state = {"req": None, "flash": 0}
 
-    ui_post(_run)
+        def animate():
+            if not root.winfo_exists():
+                return
+            for p in PULSES:
+                p["t"] = (p["t"] + p["v"]) % 1.0
+                hx, hy = point_at(p["pts"], p["t"])
+                tx, ty = point_at(p["pts"], p["t"] - 0.045)
+                c.coords(p["head"], hx - 3, hy - 3, hx + 3, hy + 3)
+                c.coords(p["tail"], tx - 2, ty - 2, tx + 2, ty + 2)
+            if state["flash"]:
+                state["flash"] -= 1
+                c.itemconfig(proxy[0], fill="#8bffc4" if state["flash"] % 2 else FG)
+            root.after(45, animate)
+
+        def tick():
+            if not root.winfo_exists():
+                return
+
+            s = fetch_stats()
+            if s is None:
+                c.itemconfig(harness[0], text="waiting", fill=DIM)
+                c.itemconfig(harness[1], text="proxy not answering", fill=BAD)
+                for pair in (proxy, upstream, sid, cache):
+                    c.itemconfig(pair[0], text="\u2014", fill=DIM)
+                    c.itemconfig(pair[1], text="", fill=DIM)
+            else:
+                c.itemconfig(harness[0], text=base_url().replace("http://", ""), fill=FG)
+                c.itemconfig(harness[1], text="your agent", fill=DIM)
+
+                c.itemconfig(proxy[0],
+                             text=f"{s.get('requests', 0)} req \u00b7 {s.get('hit_pct', 0)}% hit",
+                             fill=FG)
+                c.itemconfig(proxy[1],
+                             text=f"{s.get('sessions', 0)} session \u00b7 "
+                                  f"{short_tokens(s.get('input_tokens', 0))} tok in",
+                             fill=DIM)
+
+                acct = (s.get("account") or {}).get("windows") or {}
+
+                def used(k):
+                    v = (acct.get(k) or {}).get("percent_used")
+                    return f"{v:.0f}%" if isinstance(v, (int, float)) else "\u2014"
+
+                c.itemconfig(upstream[0],
+                             text=UPSTREAM.replace("https://", ""), fill=FG)
+                c.itemconfig(upstream[1],
+                             text=f"plan {used('rolling')} \u00b7 {used('weekly')} \u00b7 {used('monthly')}",
+                             fill=DIM)
+
+                c.itemconfig(sid[0], text="stable per chat", fill=FG)
+                c.itemconfig(sid[1], text="same x-opencode-session", fill=DIM)
+                c.itemconfig(cache[0], text=f"{s.get('hit_pct', 0)}% hit", fill=GOOD)
+                c.itemconfig(cache[1],
+                             text=f"{short_tokens(s.get('tokens_saved', 0))} tok saved",
+                             fill=DIM)
+
+                req = s.get("requests", 0)
+                if state["req"] is not None and req > state["req"]:
+                    state["flash"] = 6
+                state["req"] = req
+
+            root.after(700, tick)
+
+        def close(_e=None):
+            _live_win["open"] = False
+            root.destroy()
+
+        root.protocol("WM_DELETE_WINDOW", close)
+        root.bind("<Escape>", close)
+        animate()
+        tick()
+        poll_log()
+
+    ui_post(build)
 
 
 # ------------------------------------------------------------ stats overlay ---
@@ -935,7 +1108,7 @@ def open_settings_dialog(ic=None, item=None):
         row1 = tk.Frame(root, bg=BG)
         row1.pack(fill="x", padx=18, pady=(6, 0))
         button(row1, "Copy base URL", copy_base_url).pack(side="left", padx=(0, 8))
-        button(row1, "Live log", open_log_window).pack(side="left", padx=(0, 8))
+        button(row1, "Flow", open_log_window).pack(side="left", padx=(0, 8))
         button(row1, "History", open_history_window).pack(side="left")
 
         row2 = tk.Frame(root, bg=BG)
@@ -1343,7 +1516,7 @@ def main():
         open_stats_overlay()
 
     proxy_menu = pystray.Menu(
-        pystray.MenuItem("Live log...", open_log_window),
+        pystray.MenuItem("Flow...", open_log_window),
         pystray.MenuItem(mode_label, on_toggle_mode),
         pystray.MenuItem(enabled_label, on_toggle_enabled),
         pystray.MenuItem("Restart proxy", on_restart),
