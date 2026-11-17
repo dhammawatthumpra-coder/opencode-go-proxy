@@ -608,7 +608,7 @@ def on_toggle_overlay(ic, item):
 
 
 def usage_key_label(item=None):
-    return "Usage key: set" if usage_key() else "Usage key: not set"
+    return "Usage key setting: set" if usage_key() else "Usage key setting: not set"
 
 
 def open_usage_key_dialog(ic=None, item=None):

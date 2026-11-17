@@ -49,8 +49,8 @@ A green **GO** icon appears in the system tray:
 - `● Go proxy: RUNNING (tray) :17387` — status (non-clickable)
 - `http://127.0.0.1:17387/v1` — the base URL to paste into your harness (non-clickable)
 - **Copy base URL** — clipboard
-- **Usage key: set / not set** — paste the read-only usage key; it is saved to
-  the git-ignored `config.local.json` and the proxy restarts
+- **Usage key setting: set / not set** — paste the read-only usage key; it is
+  saved to the git-ignored `config.local.json` and the proxy restarts
 - **Show stats overlay** / **Hide stats overlay** — the floating card described
   under [Measured savings](#measured-savings)
 - **Auto-start with Windows: ON/OFF**
