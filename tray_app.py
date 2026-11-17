@@ -457,6 +457,41 @@ class ProxyCtl:
 ctl = ProxyCtl()
 icon = None
 
+# One Tk interpreter for every window, living in its own thread.
+#
+# The first version gave each window its own tk.Tk() in its own thread. Tcl
+# tolerates that until the interpreters are torn down, and then aborts the
+# whole process ("Tcl_AsyncDelete: async handler deleted by the wrong thread")
+# when one of them is collected - which is why opening Settings and History,
+# closing both, then clicking the gear again killed the tray. Everything is a
+# Toplevel under this single root now, so every Tk call happens on one thread.
+_UI = {"root": None, "ready": False}
+
+
+def _ui_loop():
+    import tkinter as tk
+
+    root = tk.Tk()
+    root.withdraw()  # hidden master; only the Toplevels are visible
+    _UI["root"] = root
+    _UI["ready"] = True
+    root.mainloop()
+
+
+def ui_post(build):
+    """Run `build` on the Tk thread, starting that thread the first time."""
+    if _UI["root"] is None:
+        threading.Thread(target=_ui_loop, daemon=True).start()
+        for _ in range(500):
+            if _UI["ready"]:
+                break
+            time.sleep(0.01)
+    root = _UI["root"]
+    if root is None:
+        return
+    root.after(0, build)
+
+
 # ------------------------------------------------------------ windows & actions ---
 
 _log_win_open = False
@@ -478,7 +513,7 @@ def open_log_window(ic=None, item=None):
             _log_win_open = False
             return
 
-        root = tk.Tk()
+        root = tk.Toplevel(_UI["root"])
         root.title("OpenCode Go Proxy - Live Log")
         root.geometry("950x620")
         dark_title_bar(root)
@@ -530,9 +565,8 @@ def open_log_window(ic=None, item=None):
             root.after(500, poll)
 
         root.after(500, poll)
-        root.mainloop()
 
-    threading.Thread(target=_run, daemon=True).start()
+    ui_post(_run)
 
 
 # ------------------------------------------------------------ stats overlay ---
@@ -611,7 +645,7 @@ def open_stats_overlay(ic=None, item=None):
         BG, DIM, FG, GOOD, BAD = "#0e1116", "#7d8695", "#e6edf3", "#22c55e", "#ef4444"
         TRACK, BADGE = "#2a313c", "#12261a"
 
-        root = tk.Tk()
+        root = tk.Toplevel(_UI["root"])
         root.overrideredirect(True)
         root.attributes("-topmost", True)
         # Opaque on purpose: 0.93, 0.97 and even 0.99 all let bright text from
@@ -773,9 +807,8 @@ def open_stats_overlay(ic=None, item=None):
 
         root.protocol("WM_DELETE_WINDOW", on_destroy)
         root.after(200, tick)
-        root.mainloop()
 
-    threading.Thread(target=_run, daemon=True).start()
+    ui_post(_run)
 
 
 def overlay_label(item=None):
@@ -800,7 +833,7 @@ def open_settings_dialog(ic=None, item=None):
 
         BG, DIM, FG, FIELD = "#0e1116", "#7d8695", "#e6edf3", "#161b22"
         GOOD, BAD = "#22c55e", "#ef4444"
-        root = tk.Tk()
+        root = tk.Toplevel(_UI["root"])
         root.title("Overlay settings")
         root.configure(bg=BG)
         dark_title_bar(root)
@@ -995,9 +1028,8 @@ def open_settings_dialog(ic=None, item=None):
         entry.focus_set()
         entry.select_range(0, "end")
         root.bind("<Escape>", lambda e: root.destroy())
-        root.mainloop()
 
-    threading.Thread(target=_run, daemon=True).start()
+    ui_post(_run)
 
 
 # ------------------------------------------------------------ history card ---
@@ -1036,7 +1068,7 @@ def open_history_window(ic=None, item=None):
         TRACK, FIELD = "#2a313c", "#161b22"
         W = 560
 
-        root = tk.Tk()
+        root = tk.Toplevel(_UI["root"])
         root.title("Usage history")
         root.configure(bg=BG)
         dark_title_bar(root)
@@ -1151,9 +1183,8 @@ def open_history_window(ic=None, item=None):
         root.protocol("WM_DELETE_WINDOW", close)
         root.bind("<Escape>", close)
         poll()
-        root.mainloop()
 
-    threading.Thread(target=_run, daemon=True).start()
+    ui_post(_run)
 
 
 def copy_base_url(ic=None, item=None):
