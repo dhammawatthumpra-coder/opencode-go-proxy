@@ -49,6 +49,8 @@ A green **GO** icon appears in the system tray:
 - `● Go proxy: RUNNING (tray) :17387` — status (non-clickable)
 - `http://127.0.0.1:17387/v1` — the base URL to paste into your harness (non-clickable)
 - **Copy base URL** — clipboard
+- **Usage key: set / not set** — paste the read-only usage key; it is saved to
+  the git-ignored `config.local.json` and the proxy restarts
 - **Show stats overlay** / **Hide stats overlay** — the floating card described
   under [Measured savings](#measured-savings)
 - **Auto-start with Windows: ON/OFF**
@@ -247,18 +249,24 @@ the number the provider bills against:
 ▓▓▓░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░
 ```
 
-Put the key in a `.env` **outside the repo** — either beside the proxy or one
-directory up, so `D:\tunnel\.env` works for a checkout in
+Easiest is the tray menu: **Usage key** opens a small window, tells you what to
+create, and stores the key in `config.local.json` — inside the repo but
+git-ignored — then restarts the proxy with it.
+
+For a headless run, set the variable yourself. The tray also loads a `.env`
+beside the proxy or one directory up, so `D:\tunnel\.env` works for a checkout in
 `D:\tunnel\opencodeproxy`:
 
 ```
 OPENCODE_GO_USAGE_KEY=oc_sk_...
 ```
 
-The tray loads that file at start and hands the variable to the proxy; the proxy
-only ever reads it from the environment, so a direct `node` run can use
-`node --env-file=../.env go-session-proxy.mjs`. Create the key with
-`Models: none` and `Usage: Read` — it cannot call a model, which is the point.
+Precedence is `config.local.json` → environment → `.env`. The proxy only ever
+reads the variable from its own environment, so a direct run needs
+`node --env-file=../.env go-session-proxy.mjs`.
+
+Create the key with **`Models: none`** and **`Usage: Read`** — it cannot call a
+model, which is the point. If it leaks it can read your quota, nothing else.
 
 The call is `GET <upstream>/usage`; the response is
 

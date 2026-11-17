@@ -33,6 +33,9 @@ from datetime import datetime, timezone
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 PROXY_JS = os.path.join(BASE_DIR, "go-session-proxy.mjs")
 CONFIG_PATH = os.path.join(BASE_DIR, "config.json")
+# Local overrides, git-ignored: the only place the tray writes to. Holds the
+# optional usage key, so it never lands in the tracked config.json.
+CONFIG_LOCAL_PATH = os.path.join(BASE_DIR, "config.local.json")
 ICON_PATH = os.path.join(BASE_DIR, "icon.png")
 TRAY_PY = os.path.abspath(__file__)
 
@@ -60,6 +63,15 @@ def load_config():
         except Exception:
             pass
     return {}
+
+
+def load_local_config():
+    try:
+        with open(CONFIG_LOCAL_PATH, "r", encoding="utf-8") as f:
+            data = json.load(f)
+            return data if isinstance(data, dict) else {}
+    except Exception:
+        return {}
 
 
 def load_env_file():
@@ -90,7 +102,23 @@ def load_env_file():
 
 
 load_env_file()
-USAGE_KEY_SET = bool(os.environ.get("OPENCODE_GO_USAGE_KEY"))
+
+
+def usage_key():
+    """The key the proxy will receive: the tray's local override first, then
+    the environment (which includes any .env loaded above)."""
+    local = str(load_local_config().get("usage_key") or "").strip()
+    return local or os.environ.get("OPENCODE_GO_USAGE_KEY", "").strip()
+
+
+def save_usage_key(key):
+    cfg = load_local_config()
+    if key:
+        cfg["usage_key"] = key
+    else:
+        cfg.pop("usage_key", None)
+    with open(CONFIG_LOCAL_PATH, "w", encoding="utf-8") as f:
+        json.dump(cfg, f, indent=2)
 
 CFG = load_config()
 PORT = int(CFG.get("port", 17387))
@@ -178,6 +206,9 @@ class ProxyCtl:
             env["LOG"] = "1"
         if CFG.get("log_usage", True):
             env["USAGE"] = "1"
+        key = usage_key()
+        if key:
+            env["OPENCODE_GO_USAGE_KEY"] = key
         return env
 
     def _rotate_log(self):
@@ -546,7 +577,7 @@ def open_stats_overlay(ic=None, item=None):
                 acct = s.get("account")
                 fill_plan(acct)
                 if acct is None:
-                    hint.config(text="OPENCODE_GO_USAGE_KEY not set")
+                    hint.config(text="no usage key - add one from the tray menu")
                 elif acct.get("error"):
                     hint.config(text="plan meters unavailable")
                 else:
@@ -574,6 +605,77 @@ def on_toggle_overlay(ic, item):
     else:
         open_stats_overlay()
     ic.update_menu()
+
+
+def usage_key_label(item=None):
+    return "Usage key: set" if usage_key() else "Usage key: not set"
+
+
+def open_usage_key_dialog(ic=None, item=None):
+    """Paste the read-only usage key. Saved to config.local.json (git-ignored),
+    then the proxy is restarted so the child process picks it up."""
+    def _run():
+        import tkinter as tk
+
+        BG, DIM, FG, FIELD = "#0e1116", "#7d8695", "#e6edf3", "#161b22"
+        root = tk.Tk()
+        root.title("Usage API key")
+        root.configure(bg=BG)
+        root.attributes("-topmost", True)
+        root.geometry("520x300")
+        root.resizable(False, False)
+
+        def text(s, size=9, color=DIM, bold=False, pady=(0, 0)):
+            tk.Label(root, text=s, bg=BG, fg=color, justify="left", wraplength=484,
+                     anchor="w", font=("Segoe UI", size, "bold" if bold else "normal")
+                     ).pack(fill="x", padx=18, pady=pady)
+
+        text("Show the plan's own quota on the card", 11, FG, True, (16, 4))
+        text("Create the key at opencode.ai/console -> Account -> Personal API keys.\n"
+             "Permissions: Custom, then Usage: Read. Leave Models on None, so the key\n"
+             "cannot call a model - it only has to read the three windows.",
+             9, DIM, False, (0, 12))
+
+        # Masked: the read-only key is still an account credential, and this
+        # window is the kind of thing that ends up in a screen recording.
+        entry = tk.Entry(root, font=("Consolas", 10), bg=FIELD, fg=FG, show="\u2022",
+                         insertbackground=FG, relief="flat", highlightthickness=1,
+                         highlightbackground="#2a313c", highlightcolor="#3b82f6")
+        entry.pack(fill="x", padx=18, ipady=6)
+        entry.insert(0, usage_key())
+
+        text(f"stored in {os.path.basename(CONFIG_LOCAL_PATH)} (git-ignored); "
+             f"the environment and .env are the fallback", 8, DIM, False, (8, 0))
+
+        def apply(key):
+            save_usage_key(key)
+            root.destroy()
+            ctl.stop()
+            if ctl.enabled and ctl.wanted:
+                ctl.start()
+            if ic:
+                try:
+                    ic.update_menu()
+                except Exception:
+                    pass
+
+        bar = tk.Frame(root, bg=BG)
+        bar.pack(fill="x", padx=18, pady=16, side="bottom")
+        for label, cmd in (("Cancel", root.destroy),
+                           ("Remove", lambda: apply("")),
+                           ("Save & restart proxy", lambda: apply(entry.get().strip()))):
+            tk.Button(bar, text=label, command=cmd, font=("Segoe UI", 9),
+                      bg=FIELD, fg=FG, activebackground="#2a313c", activeforeground=FG,
+                      relief="flat", bd=0, padx=12, pady=5, cursor="hand2"
+                      ).pack(side="right", padx=(8, 0))
+
+        entry.focus_set()
+        entry.select_range(0, "end")
+        root.bind("<Return>", lambda e: apply(entry.get().strip()))
+        root.bind("<Escape>", lambda e: root.destroy())
+        root.mainloop()
+
+    threading.Thread(target=_run, daemon=True).start()
 
 
 def copy_base_url(ic=None, item=None):
@@ -739,6 +841,7 @@ def main():
         pystray.MenuItem(url_line, lambda i, it: None, enabled=False),
         pystray.Menu.SEPARATOR,
         pystray.MenuItem("Copy base URL", copy_base_url),
+        pystray.MenuItem(usage_key_label, open_usage_key_dialog),
         pystray.MenuItem(overlay_label, on_toggle_overlay),
         pystray.MenuItem(autostart_label, on_toggle_autostart),
         pystray.Menu.SEPARATOR,
