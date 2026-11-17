@@ -197,6 +197,47 @@ def watch_alpha(root):
     tick()
 
 
+def log_line(msg):
+    """Append a line to the proxy log, which Flow and Live tail both show."""
+    try:
+        os.makedirs(os.path.dirname(LOG_PATH), exist_ok=True)
+        with open(LOG_PATH, "a", encoding="utf-8") as f:
+            f.write(msg + "\n")
+    except Exception:
+        pass
+
+
+def our_proxy_on(port):
+    """True when whatever answers on `port` is this proxy."""
+    try:
+        url = f"http://127.0.0.1:{port}/__stats"
+        with urllib.request.urlopen(url, timeout=0.6) as r:
+            data = json.loads(r.read().decode("utf-8"))
+        return isinstance(data, dict) and "requests" in data and "prices_per_1m" in data
+    except Exception:
+        return False
+
+
+def pid_listening(port):
+    """PID of the process listening on `port`, or None."""
+    try:
+        out = subprocess.run(
+            ["netstat", "-ano", "-p", "TCP"],
+            capture_output=True, text=True, timeout=6,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        ).stdout
+    except Exception:
+        return None
+    for line in out.splitlines():
+        parts = line.split()
+        if len(parts) >= 5 and parts[3] == "LISTENING" and parts[1].endswith(f":{port}"):
+            try:
+                return int(parts[4])
+            except ValueError:
+                return None
+    return None
+
+
 def monitor_rects():
     """(x, y, w, h) for every attached monitor, or [] when unknown.
 
@@ -398,12 +439,41 @@ class ProxyCtl:
             self.logfh = None
 
     # -- lifecycle ---------------------------------------------------------
+    def reclaim_port(self):
+        """Take the preferred port back from a leftover copy of this proxy.
+
+        A crashed tray leaves its node child behind. That old copy holds the
+        port, the new proxy walks to 17388, and the harness - still pointed at
+        17387 - talks to the leftover instead. Killing our own orphan keeps the
+        URL the harness already has working, which is the only "auto routing"
+        that needs no cooperation from the harness.
+
+        A port held by anything else is left alone: we do not kill strangers.
+        """
+        if not our_proxy_on(PORT):
+            return False
+        pid = pid_listening(PORT)
+        if not pid:
+            return False
+        try:
+            subprocess.run(
+                ["taskkill", "/PID", str(pid), "/F"],
+                capture_output=True,
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+            )
+        except Exception:
+            return False
+        time.sleep(0.4)
+        log_line(f"port {PORT} was held by an old copy of this proxy (pid {pid}) - stopped it")
+        return True
+
     def start(self):
         with self.lock:
             if self.proc and self.proc.poll() is None:
                 return
             RUNTIME["port"] = None
             self._rotate_log()
+            self.reclaim_port()
             cmd = [find_node(), PROXY_JS]
 
             if self.mode == "console":
@@ -1486,6 +1556,19 @@ def port_watcher():
             found = read_runtime_port()
             if found:
                 RUNTIME["port"] = found
+                if found != PORT:
+                    # Not our own leftover - say it out loud, because the
+                    # harness URL the user already has no longer points here.
+                    log_line(f"port {PORT} is taken by another program - serving on {found}")
+                    try:
+                        if icon:
+                            icon.notify(
+                                f"Port {PORT} is taken by another program.\n"
+                                f"Your harness must use http://127.0.0.1:{found}/v1",
+                                "OpenCode Go Proxy",
+                            )
+                    except Exception:
+                        pass
                 if icon:
                     try:
                         icon.update_menu()

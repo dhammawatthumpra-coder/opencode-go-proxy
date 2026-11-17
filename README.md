@@ -164,6 +164,15 @@ RUNTIME_PORT=17388
 The tray app watches for `RUNTIME_PORT=` and shows the **real** URL in its menu,
 so **Copy base URL** always copies the port the proxy actually bound.
 
+**Its own leftovers are taken back first.** A crashed tray leaves its node child
+running. That copy holds the port, the new proxy would move to 17388, and a
+harness still pointed at 17387 would quietly talk to the stale one — the
+failure this whole section is about. So before spawning, the tray probes the
+preferred port: if what answers there is this proxy, it is stopped and the port
+is reclaimed, which keeps the URL the harness already has working. A port held
+by anything else is left alone — the tray will not kill a stranger; it walks up
+and raises a notification naming the URL to switch to.
+
 **The trade-off.** Walking up is convenient, and silent. A harness still pointed
 at the preferred port sends its requests to whatever else took that port: the
 proxy log stays empty, the harness answers normally, and the prompt cache never
