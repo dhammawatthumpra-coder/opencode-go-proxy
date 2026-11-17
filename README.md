@@ -404,6 +404,7 @@ It replaced a plain tail window, which looked empty whenever the proxy was idle
 | `403 This API key can't call models` | key is scoped to `Models: Read` | set `Models: Request` |
 | `EADDRINUSE` | another copy is already running, and `port_scan` is 0 | quit one, or raise `port_scan` |
 | harness replies normally but `logs/proxy.log` stays empty | the harness points at a port the proxy is not on — the proxy moved, or something else owns that port | use **Copy base URL** from the tray, or set `port_scan` to `0` |
+| `Invalid response from model provider` in a Chromium harness (MiniMax Code, other Electron agents) | proxy older than 1.5.2 forwarded the upstream's `content-encoding` on a body it had already decoded, so the client decompressed plain text | update to 1.5.2 or newer |
 
 **Don't run two copies.** If the tray app is running, don't also start
 `node go-session-proxy.mjs` in a terminal. With `port_scan` enabled the second
