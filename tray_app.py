@@ -607,6 +607,19 @@ def open_log_window(ic=None, item=None):
         watch_alpha(root)
         dark_title_bar(root)
 
+        # Same memory as the card and the other windows; debounced because
+        # <Configure> fires for every pixel of a drag.
+        pending = {"id": None}
+
+        def remember(_e=None):
+            if pending["id"]:
+                root.after_cancel(pending["id"])
+            pending["id"] = root.after(
+                500, lambda: save_pos("flow_pos", root.winfo_x(), root.winfo_y())
+            )
+
+        root.bind("<Configure>", remember)
+
         c = tk.Canvas(root, width=W, height=H, bg=BG, bd=0, highlightthickness=0)
         c.pack(padx=16, pady=(12, 6))
 
